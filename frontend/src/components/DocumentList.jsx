@@ -1,18 +1,21 @@
+import { useEffect, useState } from "react"
+
 function DocumentList() {
-    const documents = [
-        {
-            name: "rag.pdf",
-            size: "1.2 MB",
-        },
-        {
-            name: "ai_agents.pdf",
-            size: "2.4 MB",
-        },
-        {
-            name: "langgraph.pdf",
-            size: "1.8 MB",
-        },
-    ]
+    const [documents, setDocuments] = useState([])
+
+    useEffect(() => {
+        fetch("http://localhost:8000/documents")
+            .then((response) => response.json())
+            .then((data) => {
+                setDocuments(data)
+            })
+            .catch((error) => {
+                console.error(
+                    "Failed to fetch documents:",
+                    error
+                )
+            })
+    }, [])
 
     return (
         <div className="documents">
@@ -28,7 +31,7 @@ function DocumentList() {
                 {documents.map((document) => (
                     <div
                         className="document-item"
-                        key={document.name}
+                        key={document.id}
                     >
                         <div className="document-icon">
                             PDF
