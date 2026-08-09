@@ -1,16 +1,11 @@
 from pathlib import Path
 
 from fastapi import APIRouter, UploadFile, File
+from app.services.document_service import DocumentService
 
 
 router = APIRouter()
-
-
-UPLOAD_DIR = Path("uploads")
-
-UPLOAD_DIR.mkdir(
-    exist_ok=True
-)
+document_service = DocumentService()
 
 
 documents = [
@@ -46,13 +41,10 @@ async def upload_document(
             "error": "Only PDF files are allowed"
         }
 
-    file_path = UPLOAD_DIR / file.filename
-
-    content = await file.read()
-
-    file_path.write_bytes(content)
+    file_path = await document_service.save_file(file)
 
     return {
         "message": "File uploaded successfully",
         "filename": file.filename,
+        "path": str(file_path),
     }
