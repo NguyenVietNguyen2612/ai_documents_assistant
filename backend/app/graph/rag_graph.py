@@ -9,7 +9,26 @@ from app.graph.nodes import (
     make_retrieve_node,
     make_context_node,
     make_generate_node,
+    make_evaluate_node,
 )
+
+
+def route_after_evaluate(state: RAGState):
+    is_relevant = state.get("is_relevant", False)
+    retry_count = state.get("retry_count", 0)
+    max_retries = 2
+
+    # Relevant → build context and generate
+    if is_relevant:
+        return "build_context"
+
+    # Not relevant but still allowed to retry
+    if retry_count < max_retries:
+        return "retrieve"
+
+    # Retry limit reached, proceed anyway
+    return "build_context"
+
 
 def create_rag_graph(
     retriever,
@@ -22,16 +41,17 @@ def create_rag_graph(
 
     builder.add_node(
         "retrieve",
-        make_retrieve_node(
-            retriever
-        ),
+        make_retrieve_node(retriever),
+    )
+    
+    builder.add_node(
+        "evaluate",
+        make_evaluate_node(),
     )
 
     builder.add_node(
         "build_context",
-        make_context_node(
-            context_builder
-        ),
+        make_context_node(context_builder),
     )
 
     builder.add_node(
@@ -42,30 +62,17 @@ def create_rag_graph(
         ),
     )
 
-    builder.add_edge(
-        START,
-        "retrieve",
+    builder.add_edge(START, "retrieve")
+    
+    builder.add_edge("retrieve", "evaluate")
+    
+    builder.add_conditional_edges(
+        "evaluate",
+        route_after_evaluate,
     )
 
-    builder.add_edge(
-        "retrieve",
-        "build_context",
-    )
+    builder.add_edge("build_context", "generate")
 
-    builder.add_edge(
-        "build_context",
-        "generate",
-    )
-
-    builder.add_edge(
-        "generate",
-        END,
-    )
+    builder.add_edge("generate", END)
 
     return builder.compile()
-
-    result = graph.invoke(
-    {
-        "question": "What is RAG?"
-    }
-)

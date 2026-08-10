@@ -97,11 +97,20 @@ def main():
     print("\nQuestion:")
     print(result["question"])
 
+    print("\nRetrieval Score:")
+    print(result.get("retrieval_score", "N/A"))
+
+    print("\nIs Relevant:")
+    print(result.get("is_relevant", "N/A"))
+
+    print("\nRetry Count:")
+    print(result.get("retry_count", 0))
+
     print("\nContext:")
-    print(result["context"])
+    print(result.get("context", ""))
 
     print("\nAnswer:")
-    print(result["answer"])
+    print(result.get("answer", ""))
 
     # ==================================================
     # 6. Print retrieved sources
