@@ -8,4 +8,5 @@ class RAGState(TypedDict, total=False):
     retrieval_score: float
     is_relevant: bool
     retry_count: int
+    action: str
     answer: str

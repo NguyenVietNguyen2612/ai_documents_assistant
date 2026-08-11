@@ -25,3 +25,24 @@ class LLMService:
             contents=prompt,
         )
         return response.text
+
+    def generate_structured(
+        self,
+        prompt: str,
+        response_model,
+    ):
+
+        response = self.client.models.generate_content(
+            model=self.model_name,
+            contents=prompt,
+            config={
+                "response_mime_type": "application/json",
+                "response_json_schema": (
+                    response_model.model_json_schema()
+                ),
+            },
+        )
+
+        return response_model.model_validate_json(
+            response.text
+        )

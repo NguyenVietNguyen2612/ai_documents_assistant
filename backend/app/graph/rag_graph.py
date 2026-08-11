@@ -1,3 +1,4 @@
+from backend.test import test_agent_node
 from langgraph.graph import (
     StateGraph,
     START,
@@ -10,6 +11,7 @@ from app.graph.nodes import (
     make_context_node,
     make_generate_node,
     make_evaluate_node,
+    make_agent_node,
 )
 
 
@@ -30,6 +32,20 @@ def route_after_evaluate(state: RAGState):
     return "build_context"
 
 
+def route_after_agent(state):
+
+    action = state.get(
+        "action",
+        "retrieve",
+    )
+
+    print(
+        f"[Router] Agent action: {action}"
+    )
+
+    return action
+
+
 def create_rag_graph(
     retriever,
     context_builder,
@@ -38,6 +54,11 @@ def create_rag_graph(
 ):
 
     builder = StateGraph(RAGState)
+
+    builder.add_node(
+        "agent",
+        make_agent_node(llm_service),
+    )
 
     builder.add_node(
         "retrieve",
@@ -62,9 +83,20 @@ def create_rag_graph(
         ),
     )
 
-    builder.add_edge(START, "retrieve")
+    builder.add_edge("agent", "retrieve")
     
     builder.add_edge("retrieve", "evaluate")
+
+    builder.add_edge(START,"agent")
+
+    builder.add_conditional_edges(
+        "agent",
+        route_after_agent,
+        {
+            "retrieve": "retrieve",
+            "answer": "generate",
+        },
+    )
     
     builder.add_conditional_edges(
         "evaluate",

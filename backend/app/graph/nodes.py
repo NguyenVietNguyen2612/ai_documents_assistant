@@ -1,5 +1,5 @@
 from app.graph.state import RAGState
-
+from app.graph.agent_decision import AgentDecision
 
 def make_retrieve_node(retriever):
 
@@ -115,3 +115,51 @@ def make_evaluate_node():
         }
     
     return evaluate_node
+
+
+def make_agent_node(llm_service):
+
+    def agent_node(state):
+
+        question = state["question"]
+
+        prompt = f"""
+You are the decision-making agent of a RAG system.
+
+Your job is to decide whether the user's question
+requires retrieving information from the uploaded documents.
+
+Choose:
+
+- retrieve: when information from the documents is needed.
+- answer: when the question can be answered without retrieving documents.
+
+Do not answer the user's question.
+Only decide the next action.
+
+Question:
+{question}
+"""
+
+        decision: AgentDecision = (
+            llm_service.generate_structured(
+                prompt,
+                response_model=AgentDecision,
+            )
+        )
+
+        print("\n[Node: agent]")
+
+        print(
+            f"Action: {decision.action}"
+        )
+
+        print(
+            f"Reason: {decision.reason}"
+        )
+
+        return {
+            "action": decision.action
+        }
+
+    return agent_node
