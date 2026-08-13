@@ -58,7 +58,7 @@ def make_generate_node(prompt_builder, llm_service):
 
         question = state["question"]
 
-        context = state["context"]
+        context = state.get("context", "")
 
         prompt = prompt_builder.build(
             question=question,

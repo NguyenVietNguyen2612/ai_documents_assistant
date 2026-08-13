@@ -1,4 +1,4 @@
-from backend.test import test_agent_node
+
 from langgraph.graph import (
     StateGraph,
     START,
@@ -108,3 +108,36 @@ def create_rag_graph(
     builder.add_edge("generate", END)
 
     return builder.compile()
+
+import os
+from app.services.embedding_service import EmbeddingService
+from app.services.vector_store import VectorStore
+from app.services.retriever import Retriever
+from app.services.context_builder import ContextBuilder
+from app.services.prompt_builder import PromptBuilder
+from app.services.llm_service import LLMService
+
+def _init_graph():
+    embedding_service = EmbeddingService()
+    vector_store = VectorStore()
+    retriever = Retriever(
+        embedding_service=embedding_service,
+        vector_store=vector_store,
+    )
+    context_builder = ContextBuilder()
+    prompt_builder = PromptBuilder()
+    
+    # Provide a default empty string to avoid KeyError if not set during build/import time, 
+    # but actual usage will require a valid API key.
+    llm_service = LLMService(
+        api_key=os.environ.get("GEMINI_API_KEY", "")
+    )
+
+    return create_rag_graph(
+        retriever=retriever,
+        context_builder=context_builder,
+        prompt_builder=prompt_builder,
+        llm_service=llm_service,
+    )
+
+graph = _init_graph()
