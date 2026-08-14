@@ -1,7 +1,8 @@
 import { useState } from "react"
 
-function DocumentUpload() {
+function DocumentUpload({ onUploadSuccess }) {
     const [file, setFile] = useState(null)
+    const [uploading, setUploading] = useState(false)
 
     const handleFileChange = (event) => {
         const selectedFile = event.target.files[0]
@@ -13,13 +14,35 @@ function DocumentUpload() {
         setFile(selectedFile)
     }
 
-    const handleUpload = () => {
+    const handleUpload = async () => {
         if (!file) {
-            console.log("No file selected")
             return
         }
 
-        console.log("Selected file:", file)
+        setUploading(true)
+
+        const formData = new FormData()
+        formData.append("file", file)
+
+        try {
+            const response = await fetch("http://localhost:8000/documents/upload", {
+                method: "POST",
+                body: formData,
+            })
+
+            if (response.ok) {
+                setFile(null)
+                if (onUploadSuccess) {
+                    onUploadSuccess()
+                }
+            } else {
+                console.error("Upload failed")
+            }
+        } catch (error) {
+            console.error("Error uploading file:", error)
+        } finally {
+            setUploading(false)
+        }
     }
 
     return (
@@ -66,8 +89,9 @@ function DocumentUpload() {
                     <button
                         className="upload-button"
                         onClick={handleUpload}
+                        disabled={uploading}
                     >
-                        Upload
+                        {uploading ? "Uploading..." : "Upload"}
                     </button>
                 </div>
             )}

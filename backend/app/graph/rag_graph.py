@@ -83,8 +83,7 @@ def create_rag_graph(
         ),
     )
 
-    builder.add_edge("agent", "retrieve")
-    
+
     builder.add_edge("retrieve", "evaluate")
 
     builder.add_edge(START,"agent")

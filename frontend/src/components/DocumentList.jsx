@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react"
 
-function DocumentList() {
+function DocumentList({ refreshKey }) {
     const [documents, setDocuments] = useState([])
 
     useEffect(() => {
@@ -15,7 +15,7 @@ function DocumentList() {
                     error
                 )
             })
-    }, [])
+    }, [refreshKey])
 
     return (
         <div className="documents">

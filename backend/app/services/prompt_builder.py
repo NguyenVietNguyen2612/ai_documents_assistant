@@ -6,6 +6,17 @@ class PromptBuilder:
         context: str,
     ) -> str:
 
+        if not context or not context.strip():
+            return f"""
+You are a helpful AI document assistant.
+Please respond directly to the user's conversational message.
+
+User Message:
+{question}
+
+Answer:
+"""
+
         return f"""
 You are an AI assistant answering questions
 based on the provided documents.

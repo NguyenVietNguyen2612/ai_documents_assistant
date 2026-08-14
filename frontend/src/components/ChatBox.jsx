@@ -1,19 +1,24 @@
 import { useState } from "react"
+import { sendMessage } from "../services/chatAPI"
 
 function ChatBox() {
     const [question, setQuestion] = useState("")
 
     const [messages, setMessages] = useState([])
 
-    const handleSend = () => {
-        if (!question.trim()) {
+    const [loading, setLoading] = useState(false)
+
+    const handleSend = async () => {
+        if (!question.trim() || loading) {
             return
         }
+
+        const currentQuestion = question.trim()
 
         const newMessage = {
             id: Date.now(),
             role: "user",
-            content: question,
+            content: currentQuestion,
         }
 
         setMessages((previous) => [
@@ -21,13 +26,53 @@ function ChatBox() {
             newMessage,
         ])
 
-        console.log("Question:", question)
-
         setQuestion("")
+        setLoading(true)
+
+        try {
+            const data = await sendMessage(
+                currentQuestion
+            )
+
+            const assistantMessage = {
+                id: Date.now() + 1,
+                role: "assistant",
+                content: data.answer,
+            }
+
+            setMessages((previous) => [
+                ...previous,
+                assistantMessage,
+            ])
+
+        } catch (error) {
+            console.error(
+                "Failed to send message:",
+                error
+            )
+
+            const errorMessage = {
+                id: Date.now() + 1,
+                role: "assistant",
+                content:
+                    "Sorry, I couldn't process your question.",
+            }
+
+            setMessages((previous) => [
+                ...previous,
+                errorMessage,
+            ])
+
+        } finally {
+            setLoading(false)
+        }
     }
 
     const handleKeyDown = (event) => {
-        if (event.key === "Enter" && !event.shiftKey) {
+        if (
+            event.key === "Enter" &&
+            !event.shiftKey
+        ) {
             event.preventDefault()
             handleSend()
         }
@@ -60,11 +105,23 @@ function ChatBox() {
 
                 {messages.map((message) => (
                     <div
-                        className="message user-message"
+                        className={
+                            message.role === "user"
+                                ? "message user-message"
+                                : "message assistant-message"
+                        }
                         key={message.id}
                     >
-                        <div className="avatar user-avatar">
-                            U
+                        <div
+                            className={
+                                message.role === "user"
+                                    ? "avatar user-avatar"
+                                    : "avatar assistant-avatar"
+                            }
+                        >
+                            {message.role === "user"
+                                ? "U"
+                                : "AI"}
                         </div>
 
                         <div className="message-content">
@@ -99,9 +156,12 @@ function ChatBox() {
                     <button
                         className="send-button"
                         onClick={handleSend}
-                        disabled={!question.trim()}
+                        disabled={
+                            !question.trim() ||
+                            loading
+                        }
                     >
-                        ↑
+                        {loading ? "..." : "↑"}
                     </button>
 
                 </div>

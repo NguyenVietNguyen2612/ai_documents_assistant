@@ -1,7 +1,14 @@
+import { useState } from "react"
 import DocumentUpload from "./DocumentUpload"
 import DocumentList from "./DocumentList"
 
 function Sidebar() {
+    const [refreshKey, setRefreshKey] = useState(0)
+
+    const handleUploadSuccess = () => {
+        setRefreshKey((prev) => prev + 1)
+    }
+
     return (
         <aside className="sidebar">
             <div className="brand">
@@ -13,11 +20,11 @@ function Sidebar() {
                 </div>
             </div>
 
-            <DocumentUpload />
+            <DocumentUpload onUploadSuccess={handleUploadSuccess} />
 
             <div className="sidebar-divider" />
 
-            <DocumentList />
+            <DocumentList refreshKey={refreshKey} />
 
             <div className="sidebar-footer">
                 <span className="status-dot" />
