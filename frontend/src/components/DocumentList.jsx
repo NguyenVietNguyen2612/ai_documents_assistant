@@ -3,7 +3,7 @@ import { useEffect, useState } from "react"
 function DocumentList({ refreshKey }) {
     const [documents, setDocuments] = useState([])
 
-    useEffect(() => {
+    const fetchDocuments = () => {
         fetch("http://localhost:8000/documents")
             .then((response) => response.json())
             .then((data) => {
@@ -15,7 +15,30 @@ function DocumentList({ refreshKey }) {
                     error
                 )
             })
+    }
+
+    useEffect(() => {
+        fetchDocuments()
     }, [refreshKey])
+
+    const handleDelete = (id) => {
+        if (window.confirm("Bạn có chắc chắn muốn xóa tài liệu này khỏi vector DB?")) {
+            fetch(`http://localhost:8000/documents/${id}`, {
+                method: "DELETE",
+            })
+                .then((response) => response.json())
+                .then((data) => {
+                    if (data.error) {
+                        alert("Lỗi: " + data.error);
+                    } else {
+                        fetchDocuments();
+                    }
+                })
+                .catch((error) => {
+                    console.error("Failed to delete document:", error)
+                })
+        }
+    }
 
     return (
         <div className="documents">
@@ -32,20 +55,39 @@ function DocumentList({ refreshKey }) {
                     <div
                         className="document-item"
                         key={document.id}
+                        style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}
                     >
-                        <div className="document-icon">
-                            PDF
-                        </div>
+                        <div style={{ display: "flex", alignItems: "center" }}>
+                            <div className="document-icon">
+                                PDF
+                            </div>
 
-                        <div className="document-info">
-                            <span className="document-name">
-                                {document.name}
-                            </span>
+                            <div className="document-info" style={{ marginLeft: "10px" }}>
+                                <span className="document-name" style={{ display: "block" }}>
+                                    {document.name}
+                                </span>
 
-                            <span className="document-size">
-                                {document.size}
-                            </span>
+                                <span className="document-size">
+                                    {document.size}
+                                </span>
+                            </div>
                         </div>
+                        
+                        <button 
+                            className="delete-document-btn"
+                            onClick={() => handleDelete(document.id)}
+                            style={{
+                                background: "transparent",
+                                border: "none",
+                                cursor: "pointer",
+                                fontSize: "16px",
+                                color: "#888",
+                                padding: "4px"
+                            }}
+                            title="Xóa tài liệu"
+                        >
+                            ✕
+                        </button>
                     </div>
                 ))}
             </div>
