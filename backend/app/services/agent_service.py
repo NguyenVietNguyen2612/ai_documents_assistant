@@ -3,7 +3,7 @@ class AgentService:
     def __init__(self, graph):
         self.graph = graph
 
-    def ask(self, question: str) -> str:
+    def ask(self, question: str) -> dict:
 
         initial_state = {
             "question": question,
@@ -14,4 +14,7 @@ class AgentService:
             initial_state
         )
 
-        return result["answer"]
+        return {
+            "answer": result.get("answer", ""),
+            "context": result.get("context", "")
+        }

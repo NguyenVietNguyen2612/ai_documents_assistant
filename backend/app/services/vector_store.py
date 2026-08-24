@@ -1,3 +1,4 @@
+import os
 from pymilvus import (
     MilvusClient,
     DataType,
@@ -7,10 +8,11 @@ from pymilvus import (
 class VectorStore:
     def __init__(
         self,
-        uri: str = "http://localhost:19530",
+        uri: str = None,
         collection_name: str = "document_chunks",
     ):
-        self.client = MilvusClient(uri=uri)
+        self.uri = uri or os.getenv("MILVUS_URI", "http://localhost:19530")
+        self.client = MilvusClient(uri=self.uri)
         self.collection_name = collection_name
 
     def create_collection(self, dimension: int):
@@ -123,6 +125,15 @@ class VectorStore:
         return self.client.get(
             collection_name=self.collection_name,
             ids=[record_id],
+        )
+
+    def delete_by_document_id(self, document_id: str):
+        """
+        Deletes all chunks in the collection that belong to the specified document_id.
+        """
+        return self.client.delete(
+            collection_name=self.collection_name,
+            filter=f"document_id == '{document_id}'"
         )
 
     

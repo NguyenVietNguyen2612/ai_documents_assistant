@@ -31,11 +31,11 @@ def chat(
     request: ChatRequest,
 ):
 
-    answer = agent_service.ask(
+    res = agent_service.ask(
         request.question
     )
 
     return ChatResponse(
         question=request.question,
-        answer=answer,
+        answer=res["answer"],
     )

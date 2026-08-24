@@ -1,0 +1,62 @@
+[
+    {
+        "id": "q1",
+        "question": "What is the main problem addressed in this document?",
+        "expected_answer": "The document addresses the problem of generalizable Deepfake detection and proposes an adaptive frequency-based improvement to FreqNet.",
+        "test_type": "basic_retrieval"
+    },
+    {
+        "id": "q2",
+        "question": "What is FreqNet and what problem is it designed to solve?",
+        "expected_answer": "FreqNet, or Frequency Space Learning Network, is a deep learning architecture designed specifically for generalizable Deepfake detection. It focuses on frequency-domain information rather than relying primarily on pixel-space artifacts.",
+        "test_type": "direct_retrieval"
+    },
+    {
+        "id": "q3",
+        "question": "What are the three main processing blocks of FreqNet?",
+        "expected_answer": "The three main blocks are HFRI, HFRF, and FCL.",
+        "test_type": "fact_retrieval"
+    },
+    {
+        "id": "q4",
+        "question": "What is the main technical limitation of the original FreqNet identified in the document?",
+        "expected_answer": "The original FreqNet uses hard masking that completely removes the low-frequency components, which can discard important semantic information such as global structure and context.",
+        "test_type": "technical_reasoning"
+    },
+    {
+        "id": "q5",
+        "question": "How does Adaptive Soft Masking address the limitation of hard masking in FreqNet?",
+        "expected_answer": "Instead of completely removing the low-frequency components, Adaptive Soft Masking applies learnable weights to the low-frequency region while preserving the high-frequency components with a weight of 1.",
+        "test_type": "multi_section_retrieval"
+    },
+    {
+        "id": "q6",
+        "question": "How is the adaptive frequency mask defined for low- and high-frequency regions?",
+        "expected_answer": "For the low-frequency region, the adaptive mask is defined as sigma(Wm(i,j)), while for the high-frequency region it is set to 1.",
+        "test_type": "specific_fact"
+    },
+    {
+        "id": "q7",
+        "question": "How is the filtered frequency spectrum calculated in the proposed method?",
+        "expected_answer": "The filtered spectrum is calculated using element-wise Hadamard multiplication: F_tilde = M_adapt element-wise multiplied by F.",
+        "test_type": "technical_fact"
+    },
+    {
+        "id": "q8",
+        "question": "What dataset was used in the experiments, and how was it divided?",
+        "expected_answer": "The experiments used the AI-Generated-vs-Real-Dataset. From the original 152,710 images, the group randomly selected 50,000 images: 36,000 for training, 4,000 for validation, and 10,000 for testing.",
+        "test_type": "numerical_fact"
+    },
+    {
+        "id": "q9",
+        "question": "How does the proposed method compare with the original FreqNet in terms of parameters and accuracy?",
+        "expected_answer": "Both models have approximately 1.85 million parameters. FreqNet achieves 72.16% accuracy, while the proposed method achieves 74.03%, corresponding to an improvement of 1.87 percentage points.",
+        "test_type": "comparison"
+    },
+    {
+        "id": "q10",
+        "question": "Was weight decay used to train the model?",
+        "expected_answer": "The document does not specify the weight decay used for training.",
+        "test_type": "out_of_context"
+    }
+]
