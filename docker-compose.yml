@@ -43,6 +43,30 @@ services:
       - etcd
       - minio
 
+  backend:
+    container_name: ai-documents-backend
+    build: 
+      context: ./backend
+    ports:
+      - "8000:8000"
+    env_file:
+      - ./backend/.env
+    environment:
+      - MILVUS_URI=http://standalone:19530
+    volumes:
+      - ./backend/app_data:/app/app_data
+    depends_on:
+      - standalone
+
+  frontend:
+    container_name: ai-documents-frontend
+    build:
+      context: ./frontend
+    ports:
+      - "5173:5173"
+    depends_on:
+      - backend
+
 volumes:
   etcd_data:
   minio_data:

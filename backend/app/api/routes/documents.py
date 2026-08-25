@@ -1,10 +1,8 @@
-from pathlib import Path
-
 from fastapi import APIRouter, UploadFile, File
 from app.services.document_service import DocumentService
 from app.services.vector_store import VectorStore
-
-import json
+from app.services.db_service import db_service
+import uuid
 
 router = APIRouter()
 document_service = DocumentService()
@@ -15,28 +13,11 @@ vector_store.create_collection(384)
 vector_store.create_index()
 vector_store.load_collection()
 
-METADATA_FILE = Path("uploads/metadata.json")
-
-def load_documents():
-    if METADATA_FILE.exists():
-        try:
-            with open(METADATA_FILE, "r", encoding="utf-8") as f:
-                return json.load(f)
-        except Exception:
-            return []
-    return []
-
-def save_documents():
-    METADATA_FILE.parent.mkdir(parents=True, exist_ok=True)
-    with open(METADATA_FILE, "w", encoding="utf-8") as f:
-        json.dump(documents, f, ensure_ascii=False, indent=4)
-
-documents = load_documents()
-
 
 @router.get("/documents")
 def get_documents():
-    return documents
+    # Lấy dữ liệu trực tiếp từ SQLite Database thay vì JSON
+    return db_service.get_all_documents()
 
 
 @router.post("/documents/upload")
@@ -48,23 +29,16 @@ async def upload_document(
             "error": "Only PDF files are allowed"
         }
 
-    file_path = await document_service.save_file(file)
-
-    import uuid
+    # Bỏ lưu xuống đĩa. Xử lý trực tiếp trên RAM.
     doc_id = str(uuid.uuid4())
     file_size = getattr(file, "size", 0)
     size_mb = f"{round(file_size / 1024 / 1024, 2)} MB" if file_size else "Unknown"
     
-    new_doc = {
-        "id": doc_id,
-        "name": file.filename,
-        "size": size_mb,
-    }
-    documents.append(new_doc)
-    save_documents()
+    # Lưu metadata vào SQLite
+    db_service.insert_document(doc_id, file.filename, size_mb)
 
-    # Process the document to extract text, chunk, and embed
-    processed = document_service.process_document(file_path)
+    # Process the document to extract text, chunk, and embed directly from RAM
+    processed = document_service.process_document(file)
     
     data_to_insert = []
     for i, (chunk, embedding) in enumerate(zip(processed["chunks"], processed["embeddings"])):
@@ -89,18 +63,15 @@ async def upload_document(
         print(f"Inserted {len(data_to_insert)} chunks for {file.filename} into Vector DB.")
 
     return {
-        "message": "File uploaded successfully",
-        "filename": file.filename,
-        "path": str(file_path),
+        "message": "File processed and uploaded successfully in-memory",
+        "filename": file.filename
     }
+
 
 @router.delete("/documents/{document_id}")
 def delete_document(document_id: str):
-    global documents
-    
-    # Remove from memory if it exists
-    documents = [doc for doc in documents if doc["id"] != document_id]
-    save_documents()
+    # Remove from SQLite
+    db_service.delete_document(document_id)
     
     # Remove from Milvus unconditionally
     try:

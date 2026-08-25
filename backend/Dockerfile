@@ -12,7 +12,9 @@ RUN apt-get update && apt-get install -y \
 # Copy requirements.txt vào trước để tận dụng Docker cache
 COPY requirements.txt .
 
-# Cài đặt các thư viện Python
+# Cài đặt bản Torch CPU-only trước (nhẹ hơn 4GB, tránh lỗi sập Docker vì hết RAM/Ổ cứng)
+RUN pip install torch --index-url https://download.pytorch.org/whl/cpu
+# Cài đặt các thư viện Python còn lại
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy toàn bộ mã nguồn backend vào container

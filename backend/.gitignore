@@ -9,4 +9,4 @@ __pycache__/
 .venv/
 
 # Folder Uploaded Documents
-uploads/
+test_documents/

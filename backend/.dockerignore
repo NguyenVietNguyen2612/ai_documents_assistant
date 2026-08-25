@@ -2,6 +2,6 @@
 __pycache__/
 *.pyc
 .env
-uploads/
+test_documents/
 .pytest_cache/
 .DS_Store
