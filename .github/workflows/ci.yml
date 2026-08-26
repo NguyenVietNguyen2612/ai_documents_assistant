@@ -1,0 +1,28 @@
+name: CI Pipeline
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      # Bước 1: Kéo (checkout) mã nguồn từ GitHub về máy chủ chạy CI
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # Bước 2: Thử nghiệm Build Docker image cho Backend
+      - name: Build Backend Image
+        run: docker build -t ai-documents-backend:latest ./backend
+        
+      # Bước 3: Thử nghiệm Build Docker image cho Frontend
+      - name: Build Frontend Image
+        run: docker build -t ai-documents-frontend:latest ./frontend
+
+      # (Tùy chọn) Bước 4: Chạy Unit Test cho Backend (nếu bạn có viết test bằng pytest)
+      # - name: Run Backend Tests
+      #   run: docker run --rm ai-documents-backend:latest pytest
