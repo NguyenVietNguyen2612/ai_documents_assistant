@@ -30,9 +30,8 @@ jobs:
 
       - name: Run Pytest
         run: |
-          # Chỉ chạy pytest trong thư mục chứa Unit Test thật sự (backend/tests)
-          # (Bỏ qua thư mục test cũ chứa script thủ công)
-          pytest backend/auto_tests/
+          cd backend
+          pytest auto_tests/
 
   # ==========================================
   # PHẦN CD: ĐÓNG GÓI VÀ PHÂN PHỐI (DELIVERY)
