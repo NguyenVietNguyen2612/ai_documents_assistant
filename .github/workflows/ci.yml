@@ -20,7 +20,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
-          python-version: '3.11' # Thay đổi nếu bạn dùng phiên bản khác
+          python-version: '3.12' # Đã cập nhật lên 3.12 để hỗ trợ numpy mới nhất
 
       - name: Install dependencies
         run: |
@@ -30,8 +30,9 @@ jobs:
 
       - name: Run Pytest
         run: |
-          # Chạy test trong thư mục backend/test
-          pytest backend/test/
+          # Chỉ chạy pytest trong thư mục chứa Unit Test thật sự (backend/tests)
+          # (Bỏ qua thư mục test cũ chứa script thủ công)
+          pytest backend/auto_tests/
 
   # ==========================================
   # PHẦN CD: ĐÓNG GÓI VÀ PHÂN PHỐI (DELIVERY)
