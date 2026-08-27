@@ -7,21 +7,49 @@ on:
     branches: [ "main" ]
 
 jobs:
-  build-and-push:
+  # ==========================================
+  # PHẦN CI: KIỂM TRA (INTEGRATION)
+  # ==========================================
+  test-backend:
+    name: Run Backend Tests (CI)
     runs-on: ubuntu-latest
-
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # Đăng nhập vào Docker Hub sử dụng thông tin bảo mật (Secrets)
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11' # Thay đổi nếu bạn dùng phiên bản khác
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r backend/requirements.txt
+          pip install pytest
+
+      - name: Run Pytest
+        run: |
+          # Chạy test trong thư mục backend/test
+          pytest backend/test/
+
+  # ==========================================
+  # PHẦN CD: ĐÓNG GÓI VÀ PHÂN PHỐI (DELIVERY)
+  # ==========================================
+  build-and-push:
+    name: Build & Push Images (CD)
+    needs: test-backend # BẮT BUỘC job CI phải pass thì job CD mới được chạy
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
       - name: Log in to Docker Hub
         uses: docker/login-action@v3
         with:
           username: ${{ secrets.DOCKER_USERNAME }}
           password: ${{ secrets.DOCKER_PASSWORD }}
 
-      # Build và tự động Push Backend Image lên Docker Hub
       - name: Build and Push Backend Image
         uses: docker/build-push-action@v5
         with:
@@ -29,7 +57,6 @@ jobs:
           push: true
           tags: ${{ secrets.DOCKER_USERNAME }}/ai-documents-backend:latest
 
-      # Build và tự động Push Frontend Image lên Docker Hub
       - name: Build and Push Frontend Image
         uses: docker/build-push-action@v5
         with:
