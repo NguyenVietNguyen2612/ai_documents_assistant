@@ -21,12 +21,21 @@ jobs:
         uses: actions/setup-python@v4
         with:
           python-version: '3.12' # Đã cập nhật lên 3.12 để hỗ trợ numpy mới nhất
+          cache: 'pip' # Bật tính năng cache thư viện
+          cache-dependency-path: 'backend/requirements.txt' # Trỏ tới file requirements để Github theo dõi sự thay đổi
 
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -r backend/requirements.txt
           pip install pytest
+
+      - name: Start Database Services
+        run: |
+          # Khởi động Milvus (standalone) và các dependency của nó (etcd, minio) ở chế độ nền
+          docker compose up -d standalone
+          # Đợi 15 giây để Milvus khởi động hoàn toàn trước khi test
+          sleep 15
 
       - name: Run Pytest
         run: |
