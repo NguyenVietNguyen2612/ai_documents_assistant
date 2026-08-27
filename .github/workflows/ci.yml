@@ -31,7 +31,7 @@ jobs:
       - name: Run Pytest
         run: |
           cd backend
-          pytest auto_tests/
+          python -m pytest auto_tests/
 
   # ==========================================
   # PHẦN CD: ĐÓNG GÓI VÀ PHÂN PHỐI (DELIVERY)
