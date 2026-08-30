@@ -39,7 +39,7 @@ jobs:
 
       - name: Run Pytest
         env:
-          GEMINI_API_KEY: "dummy_key_for_testing_purposes"
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
         run: |
           cd backend
           python -m pytest auto_tests/
