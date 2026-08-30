@@ -1,0 +1,46 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: backend-deployment
+  labels:
+    app: backend
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: backend
+  template:
+    metadata:
+      labels:
+        app: backend
+    spec:
+      containers:
+      - name: backend
+        image: nguyenvietnguyen2612/ai-documents-backend:latest
+        imagePullPolicy: Always
+        ports:
+        - containerPort: 8000
+        
+        # Tiêm các biến môi trường từ ConfigMap và Secret vào Container
+        envFrom:
+        - configMapRef:
+            name: backend-config
+        - secretRef:
+            name: backend-secret
+        
+        # (Tạm thời bỏ qua phần Volume/Thư mục upload vì sẽ học ở bài nâng cao)
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: backend-service
+spec:
+  # LoadBalancer giúp frontend ở dưới máy tính truy cập được Backend thông qua localhost:8000
+  type: LoadBalancer
+  selector:
+    app: backend
+  ports:
+    - protocol: TCP
+      port: 8000
+      targetPort: 8000

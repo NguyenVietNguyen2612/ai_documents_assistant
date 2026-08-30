@@ -1,0 +1,38 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: frontend-deployment
+  labels:
+    app: frontend
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: frontend
+  template:
+    metadata:
+      labels:
+        app: frontend
+    spec:
+      containers:
+      - name: frontend
+        # Lấy chính xác Image mới nhất mà hệ thống CI/CD đã tự động đẩy lên Docker Hub
+        image: nguyenvietnguyen2612/ai-documents-frontend:latest
+        imagePullPolicy: Always
+        ports:
+        - containerPort: 5173
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: frontend-service
+spec:
+  # LoadBalancer giúp Docker Desktop tự động kết nối cổng localhost của máy tính vào K8s
+  type: LoadBalancer
+  selector:
+    app: frontend
+  ports:
+    - protocol: TCP
+      port: 5173          # Cổng bạn gõ trên trình duyệt (localhost:5173)
+      targetPort: 5173    # Cổng mà ứng dụng React/Vite đang chạy bên trong Pod

@@ -1,0 +1,19 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: backend-config
+data:
+  # Sử dụng host.docker.internal để Backend (trong K8s) gọi ra Milvus (đang chạy bằng Docker Compose bên ngoài)
+  MILVUS_URI: "http://host.docker.internal:19530"
+
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: backend-secret
+type: Opaque
+stringData:
+  # Nhập API Key thật của bạn vào đây.
+  # LƯU Ý: Trong thực tế, KHÔNG BAO GIỜ được commit file chứa Secret này lên GitHub!
+  # Nếu bạn đã có file .env ở thư mục backend, hãy copy cái mã đó dán vào đây.
+  GEMINI_API_KEY: "YOUR_API_KEY_HERE"
