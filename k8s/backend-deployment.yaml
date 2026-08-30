@@ -16,8 +16,8 @@ spec:
     spec:
       containers:
       - name: backend
-        image: nguyenvietnguyen2612/ai-documents-backend:latest
-        imagePullPolicy: Always
+        image: nguyenvietnguyen2612/ai-documents-backend:v2
+        imagePullPolicy: IfNotPresent
         ports:
         - containerPort: 8000
         
