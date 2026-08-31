@@ -10,3 +10,6 @@ __pycache__/
 
 # Folder Uploaded Documents
 test_documents/
+
+# SQLite Database
+app_data/database.db

@@ -34,5 +34,5 @@ spec:
     app: frontend
   ports:
     - protocol: TCP
-      port: 5173          # Cổng bạn gõ trên trình duyệt (localhost:5173)
+      port: 5174          # Cổng bạn gõ trên trình duyệt (localhost:5174)
       targetPort: 5173    # Cổng mà ứng dụng React/Vite đang chạy bên trong Pod
