@@ -79,7 +79,7 @@ class LLMService:
 Bạn là chuyên gia trích xuất dữ liệu tài liệu.
 Nhiệm vụ: Trích xuất toàn bộ văn bản từ hình ảnh/tài liệu được cung cấp.
 Yêu cầu bắt buộc:
-1. Giữ nguyên toàn bộ cấu trúc đoạn văn, tiêu đề.
+1. Giữ nguyên toàn bộ cấu trúc đoạn văn, tiêu đề. BẮT BUỘC sử dụng thẻ Markdown chuẩn cho các Tiêu đề (ví dụ: # Tiêu đề 1, ## Tiêu đề 2, ### Tiêu đề 3) để thể hiện cấu trúc phân cấp.
 2. NẾU CÓ BẢNG BIỂU (TABLE): BẮT BUỘC trình bày dưới dạng chuẩn Markdown (ví dụ: | Cột 1 | Cột 2 |). KHÔNG ĐƯỢC biến bảng thành các đoạn text rời rạc. Phải giữ nguyên hàng và cột.
 3. Chỉ trả về nội dung trích xuất, không giải thích gì thêm.
 """

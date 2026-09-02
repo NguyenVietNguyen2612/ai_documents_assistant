@@ -25,7 +25,7 @@ function DocumentUpload({ onUploadSuccess }) {
         formData.append("file", file)
 
         try {
-            const response = await fetch("http://localhost:8000/documents/upload", {
+            const response = await fetch("http://localhost:8001/documents/upload", {
                 method: "POST",
                 body: formData,
             })

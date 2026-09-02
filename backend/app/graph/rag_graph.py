@@ -1,122 +1,61 @@
-
-from langgraph.graph import (
-    StateGraph,
-    START,
-    END,
-)
-
-from app.graph.state import RAGState
-from app.graph.nodes import (
-    make_retrieve_node,
-    make_context_node,
-    make_generate_node,
-    make_evaluate_node,
-    make_agent_node,
-)
-
-
-def route_after_evaluate(state: RAGState):
-    is_relevant = state.get("is_relevant", False)
-    retry_count = state.get("retry_count", 0)
-    max_retries = 2
-
-    # Relevant → build context and generate
-    if is_relevant:
-        return "build_context"
-
-    # Not relevant but still allowed to retry
-    if retry_count < max_retries:
-        return "retrieve"
-
-    # Retry limit reached, proceed anyway
-    return "build_context"
-
-
-def route_after_agent(state):
-
-    action = state.get(
-        "action",
-        "retrieve",
-    )
-
-    print(
-        f"[Router] Agent action: {action}"
-    )
-
-    return action
-
-
-def create_rag_graph(
-    retriever,
-    context_builder,
-    prompt_builder,
-    llm_service,
-):
-
-    builder = StateGraph(RAGState)
-
-    builder.add_node(
-        "agent",
-        make_agent_node(llm_service),
-    )
-
-    builder.add_node(
-        "retrieve",
-        make_retrieve_node(retriever),
-    )
-    
-    builder.add_node(
-        "evaluate",
-        make_evaluate_node(),
-    )
-
-    builder.add_node(
-        "build_context",
-        make_context_node(context_builder),
-    )
-
-    builder.add_node(
-        "generate",
-        make_generate_node(
-            prompt_builder,
-            llm_service,
-        ),
-    )
-
-
-    builder.add_edge("retrieve", "evaluate")
-
-    builder.add_edge(START,"agent")
-
-    builder.add_conditional_edges(
-        "agent",
-        route_after_agent,
-        {
-            "retrieve": "retrieve",
-            "answer": "generate",
-        },
-    )
-    
-    builder.add_conditional_edges(
-        "evaluate",
-        route_after_evaluate,
-    )
-
-    builder.add_edge("build_context", "generate")
-
-    builder.add_edge("generate", END)
-
-    return builder.compile()
-
 import os
+from langgraph.graph import StateGraph, START, END
+from langgraph.prebuilt import ToolNode, tools_condition
+from langchain_google_genai import ChatGoogleGenerativeAI
+
+from app.graph.state import AgentState
+from app.tools.retrieval_tool import make_retrieve_tool
+
 from app.services.embedding_service import EmbeddingService
 from app.services.vector_store import VectorStore
 from app.services.retriever import Retriever
 from app.services.context_builder import ContextBuilder
-from app.services.prompt_builder import PromptBuilder
-from app.services.llm_service import LLMService
+
+def create_agent_graph(llm, tools):
+    builder = StateGraph(AgentState)
+    
+    # Ràng buộc công cụ vào LLM
+    llm_with_tools = llm.bind_tools(tools)
+    
+    # Định nghĩa Agent Node
+    def agent_node(state: AgentState):
+        messages = state["messages"]
+        
+        # Đếm số lần công cụ đã được gọi (dựa trên số ToolMessage)
+        from langchain_core.messages import ToolMessage, SystemMessage
+        tool_calls_count = sum(1 for m in messages if isinstance(m, ToolMessage))
+        
+        if tool_calls_count >= 3:
+            print("[Agent] Đã đạt giới hạn 3 lần tìm kiếm. Ép buộc trả lời...")
+            # Dùng LLM nguyên thủy (không bind tool) để ép nó phải trả lời bằng chữ
+            forced_response = llm.invoke(messages + [
+                SystemMessage(content="Bạn đã đạt giới hạn 3 lần tìm kiếm tài liệu. BẮT BUỘC KHÔNG TÌM KIẾM THÊM. Hãy tổng hợp và đưa ra câu trả lời cuối cùng dựa trên các thông tin đã tìm được.")
+            ])
+            return {"messages": [forced_response]}
+            
+        # LLM tự động đọc lịch sử chat và quyết định gọi tool hay trả lời trực tiếp
+        response = llm_with_tools.invoke(messages)
+        return {"messages": [response]}
+        
+    builder.add_node("agent", agent_node)
+    
+    # Định nghĩa Tool Node (thực thi tool)
+    tool_node = ToolNode(tools)
+    builder.add_node("tools", tool_node)
+    
+    # Cấu hình luồng (Graph)
+    builder.add_edge(START, "agent")
+    
+    # Cạnh điều kiện: Nếu LLM muốn gọi tool -> Sang node tools, nếu không -> END
+    builder.add_conditional_edges("agent", tools_condition)
+    
+    # Sau khi thực thi tool xong, trả kết quả về lại cho Agent phân tích tiếp
+    builder.add_edge("tools", "agent")
+    
+    return builder.compile()
 
 def _init_graph():
+    # Khởi tạo các dịch vụ cơ sở
     embedding_service = EmbeddingService()
     vector_store = VectorStore()
     retriever = Retriever(
@@ -124,19 +63,24 @@ def _init_graph():
         vector_store=vector_store,
     )
     context_builder = ContextBuilder()
-    prompt_builder = PromptBuilder()
     
-    # Provide a default empty string to avoid KeyError if not set during build/import time, 
-    # but actual usage will require a valid API key.
-    llm_service = LLMService(
-        api_key=os.environ.get("GEMINI_API_KEY", "")
+    # 1. Khởi tạo các Công cụ (Tools)
+    retrieve_tool = make_retrieve_tool(retriever, context_builder)
+    
+    # Tạm thời chỉ đưa vào 1 tool (Retrieval), sau này thêm Calculator/Tavily vào danh sách này
+    tools = [retrieve_tool]
+    
+    # 2. Khởi tạo LLM cho Agent
+    # Model gemini-1.5-flash hoặc pro đều hỗ trợ Tool Calling cực tốt
+    model_name = os.environ.get("GEMINI_MODEL", "gemini-3.1-flash-lite")
+    
+    llm = ChatGoogleGenerativeAI(
+        model=model_name,
+        google_api_key=os.environ.get("GEMINI_API_KEY", ""),
+        temperature=0,
     )
-
-    return create_rag_graph(
-        retriever=retriever,
-        context_builder=context_builder,
-        prompt_builder=prompt_builder,
-        llm_service=llm_service,
-    )
+    
+    # Build Graph
+    return create_agent_graph(llm, tools)
 
 graph = _init_graph()

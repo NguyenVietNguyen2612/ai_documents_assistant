@@ -1,6 +1,6 @@
 from pypdf import PdfReader
 from fastapi import UploadFile
-from langchain_text_splitters import MarkdownTextSplitter, RecursiveCharacterTextSplitter
+from langchain_text_splitters import MarkdownHeaderTextSplitter, RecursiveCharacterTextSplitter
 from .embedding_service import EmbeddingService
 from .llm_service import LLMService
 
@@ -35,14 +35,37 @@ class DocumentService:
             return ""
 
     def chunk_text(self, text: str) -> list[str]:
-        # Dùng MarkdownTextSplitter để ưu tiên giữ nguyên bảng biểu Markdown
         try:
-            splitter = MarkdownTextSplitter(
-                chunk_size=1200,
-                chunk_overlap=200,
+            # Bước 1: Chia theo Markdown Headers
+            headers_to_split_on = [
+                ("#", "Header 1"),
+                ("##", "Header 2"),
+                ("###", "Header 3"),
+            ]
+            markdown_splitter = MarkdownHeaderTextSplitter(headers_to_split_on=headers_to_split_on)
+            md_header_splits = markdown_splitter.split_text(text)
+            
+            # Bước 2: Đảm bảo độ dài không vượt ngưỡng
+            char_splitter = RecursiveCharacterTextSplitter(
+                chunk_size=1000,
+                chunk_overlap=150,
             )
-            return splitter.split_text(text)
-        except Exception:
+            final_splits = char_splitter.split_documents(md_header_splits)
+            
+            # Bước 3: Làm giàu ngữ cảnh (Inject metadata vào text)
+            final_chunks = []
+            for split in final_splits:
+                header_path = " > ".join(split.metadata.values())
+                if header_path:
+                    chunk_content = f"[{header_path}]\n{split.page_content}"
+                else:
+                    chunk_content = split.page_content
+                final_chunks.append(chunk_content)
+                
+            return final_chunks if final_chunks else [text]
+            
+        except Exception as e:
+            print(f"[DocumentService] Lỗi khi dùng Structural Chunking: {e}. Fallback sang RecursiveCharacterTextSplitter...")
             # Fallback
             splitter = RecursiveCharacterTextSplitter(
                 chunk_size=1000,

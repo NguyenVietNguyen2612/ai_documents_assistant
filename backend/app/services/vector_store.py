@@ -107,19 +107,25 @@ class VectorStore:
         self,
         query_vector: list[float],
         limit: int = 5,
+        document_name: str = None,
     ):
-        return self.client.search(
-            collection_name=self.collection_name,
-            data=[query_vector],
-            limit=limit,
-            output_fields=[
+        search_params = {
+            "collection_name": self.collection_name,
+            "data": [query_vector],
+            "limit": limit,
+            "output_fields": [
                 "text",
                 "document_id",
                 "document_name",
                 "page",
                 "chunk_index",
             ],
-        )
+        }
+        
+        if document_name:
+            search_params["filter"] = f"document_name like '%{document_name}%'"
+            
+        return self.client.search(**search_params)
     
     def get_by_id(self, record_id: str):
         return self.client.get(
@@ -135,5 +141,15 @@ class VectorStore:
             collection_name=self.collection_name,
             filter=f"document_id == '{document_id}'"
         )
+
+    def get_all_document_ids(self) -> list[str]:
+        if not self.client.has_collection(self.collection_name):
+            return []
+        res = self.client.query(
+            collection_name=self.collection_name, 
+            filter="id != ''", 
+            output_fields=["document_id"]
+        )
+        return list(set(r.get("document_id") for r in res if r.get("document_id")))
 
     

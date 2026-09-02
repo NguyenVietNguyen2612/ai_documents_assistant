@@ -45,10 +45,10 @@ services:
 
   backend:
     container_name: ai-documents-backend
-    build: 
+    build:
       context: ./backend
     ports:
-      - "8000:8000"
+      - "8001:8000"
     env_file:
       - ./backend/.env
     environment:
@@ -63,7 +63,7 @@ services:
     build:
       context: ./frontend
     ports:
-      - "5174:5173"
+      - "3000:3000"
     depends_on:
       - backend
 

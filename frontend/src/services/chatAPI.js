@@ -1,6 +1,6 @@
-const API_BASE_URL = "http://localhost:8000";
+const API_BASE_URL = "http://localhost:8001";
 
-export async function sendMessage(question) {
+export async function sendMessage(question, history = []) {
     const response = await fetch(
         `${API_BASE_URL}/chat`,
         {
@@ -12,6 +12,7 @@ export async function sendMessage(question) {
 
             body: JSON.stringify({
                 question: question,
+                history: history,
             }),
         }
     );

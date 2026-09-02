@@ -32,7 +32,8 @@ def chat(
 ):
 
     res = agent_service.ask(
-        request.question
+        request.question,
+        request.history
     )
 
     return ChatResponse(

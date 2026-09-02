@@ -12,12 +12,14 @@ class Retriever:
         self,
         query: str,
         top_k: int = 5,
+        document_name: str = None,
     ):
         query_vector = self.embedding_service.embed_chunks(query)
 
         results = self.vector_store.search(
             query_vector=query_vector,
             limit=top_k,
+            document_name=document_name,
         )
 
         return results

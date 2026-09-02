@@ -4,7 +4,7 @@ function DocumentList({ refreshKey }) {
     const [documents, setDocuments] = useState([])
 
     const fetchDocuments = () => {
-        fetch("http://localhost:8000/documents")
+        fetch("http://localhost:8001/documents")
             .then((response) => response.json())
             .then((data) => {
                 setDocuments(data)
@@ -23,7 +23,7 @@ function DocumentList({ refreshKey }) {
 
     const handleDelete = (id) => {
         if (window.confirm("Bạn có chắc chắn muốn xóa tài liệu này khỏi vector DB?")) {
-            fetch(`http://localhost:8000/documents/${id}`, {
+            fetch(`http://localhost:8001/documents/${id}`, {
                 method: "DELETE",
             })
                 .then((response) => response.json())

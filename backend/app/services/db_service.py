@@ -50,5 +50,11 @@ class DBService:
             cursor.execute("DELETE FROM documents WHERE id = ?", (doc_id,))
             conn.commit()
 
+    def get_all_document_ids(self) -> list[str]:
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT id FROM documents")
+            return [row["id"] for row in cursor.fetchall()]
+
 # Khởi tạo instance dùng chung
 db_service = DBService()

@@ -30,8 +30,10 @@ function ChatBox() {
         setLoading(true)
 
         try {
+            const history = messages.map(msg => ({ role: msg.role, content: msg.content }))
             const data = await sendMessage(
-                currentQuestion
+                currentQuestion,
+                history
             )
 
             const assistantMessage = {
