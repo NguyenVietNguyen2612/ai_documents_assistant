@@ -29,7 +29,7 @@ def create_agent_graph(llm, tools):
             print("[Agent] Đã đạt giới hạn 3 lần tìm kiếm. Ép buộc trả lời...")
             # Dùng LLM nguyên thủy (không bind tool) để ép nó phải trả lời bằng chữ
             forced_response = llm.invoke(messages + [
-                SystemMessage(content="Bạn đã đạt giới hạn 3 lần tìm kiếm tài liệu. BẮT BUỘC KHÔNG TÌM KIẾM THÊM. Hãy tổng hợp và đưa ra câu trả lời cuối cùng dựa trên các thông tin đã tìm được.")
+                SystemMessage(content="Bạn đã đạt giới hạn 3 lần tìm kiếm tài liệu. BẮT BUỘC KHÔNG TÌM KIẾM THÊM. Hãy tổng hợp và đưa ra câu trả lời cuối cùng dựa trên các thông tin đã tìm được. LƯU Ý BẮT BUỘC: Không dùng các ký hiệu Markdown như **, ##. Nếu phân cấp hoặc liệt kê, chỉ dùng -, +, . hoặc số thứ tự ở đầu dòng.")
             ])
             return {"messages": [forced_response]}
             

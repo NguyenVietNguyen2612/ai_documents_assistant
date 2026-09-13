@@ -1,4 +1,5 @@
 from fastapi import APIRouter
+from fastapi.responses import StreamingResponse
 
 from app.schemas.chat import (
     ChatRequest,
@@ -39,4 +40,24 @@ def chat(
     return ChatResponse(
         question=request.question,
         answer=res["answer"],
+    )
+
+
+@router.post(
+    "/stream",
+)
+async def chat_stream(
+    request: ChatRequest,
+):
+    return StreamingResponse(
+        agent_service.ask_stream(
+            request.question,
+            request.history
+        ),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        }
     )
