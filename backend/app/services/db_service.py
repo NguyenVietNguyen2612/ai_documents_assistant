@@ -27,6 +27,27 @@ class DBService:
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
             """)
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS chat_sessions (
+                    id TEXT PRIMARY KEY,
+                    title TEXT NOT NULL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS chat_messages (
+                    id TEXT PRIMARY KEY,
+                    session_id TEXT NOT NULL,
+                    role TEXT NOT NULL,
+                    content TEXT NOT NULL,
+                    thoughts_json TEXT,
+                    checkpoint_id TEXT,
+                    order_index INTEGER DEFAULT 0,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (session_id) REFERENCES chat_sessions(id) ON DELETE CASCADE
+                )
+            """)
             conn.commit()
 
     def get_all_documents(self):
@@ -55,6 +76,148 @@ class DBService:
             cursor = conn.cursor()
             cursor.execute("SELECT id FROM documents")
             return [row["id"] for row in cursor.fetchall()]
+
+    # =========================
+    # CHAT SESSIONS & MESSAGES
+    # =========================
+
+    def get_all_sessions(self):
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT id, title, created_at, updated_at FROM chat_sessions ORDER BY updated_at DESC")
+            return [dict(row) for row in cursor.fetchall()]
+
+    def get_session(self, session_id: str):
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT id, title, created_at, updated_at FROM chat_sessions WHERE id = ?", (session_id,))
+            row = cursor.fetchone()
+            return dict(row) if row else None
+
+    def create_session(self, session_id: str = None, title: str = "Cuộc trò chuyện mới"):
+        import uuid
+        if not session_id:
+            session_id = f"session_{uuid.uuid4().hex[:10]}"
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "INSERT OR IGNORE INTO chat_sessions (id, title, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP)",
+                (session_id, title)
+            )
+            conn.commit()
+            return self.get_session(session_id)
+
+    def update_session_title(self, session_id: str, title: str):
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "UPDATE chat_sessions SET title = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                (title, session_id)
+            )
+            conn.commit()
+
+    def touch_session(self, session_id: str):
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "UPDATE chat_sessions SET updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                (session_id,)
+            )
+            conn.commit()
+
+    def delete_session(self, session_id: str) -> bool:
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("DELETE FROM chat_messages WHERE session_id = ?", (session_id,))
+            cursor.execute("DELETE FROM chat_sessions WHERE id = ?", (session_id,))
+            conn.commit()
+            return True
+
+    def save_message(self, session_id: str, role: str, content: str, message_id: str = None, thoughts: list = None, checkpoint_id: str = None, order_index: int = None) -> str:
+        import json
+        import uuid
+        if not message_id:
+            message_id = f"msg_{uuid.uuid4().hex[:12]}"
+
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            # Ensure session exists
+            cursor.execute(
+                "INSERT OR IGNORE INTO chat_sessions (id, title, updated_at) VALUES (?, 'Cuộc trò chuyện mới', CURRENT_TIMESTAMP)",
+                (session_id,)
+            )
+
+            if order_index is None:
+                cursor.execute("SELECT COALESCE(MAX(order_index), 0) + 1 AS next_idx FROM chat_messages WHERE session_id = ?", (session_id,))
+                row = cursor.fetchone()
+                order_index = row["next_idx"] if row else 1
+
+            thoughts_json = json.dumps(thoughts, ensure_ascii=False) if thoughts else None
+            cursor.execute("""
+                INSERT INTO chat_messages (id, session_id, role, content, thoughts_json, checkpoint_id, order_index)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(id) DO UPDATE SET
+                    content = excluded.content,
+                    thoughts_json = excluded.thoughts_json,
+                    checkpoint_id = COALESCE(excluded.checkpoint_id, chat_messages.checkpoint_id)
+            """, (str(message_id), session_id, role, content, thoughts_json, checkpoint_id, order_index))
+
+            # Update session touch time
+            cursor.execute("UPDATE chat_sessions SET updated_at = CURRENT_TIMESTAMP WHERE id = ?", (session_id,))
+            conn.commit()
+            return str(message_id)
+
+    def update_message_checkpoint(self, message_id: str, checkpoint_id: str):
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("UPDATE chat_messages SET checkpoint_id = ? WHERE id = ?", (checkpoint_id, message_id))
+            conn.commit()
+
+    def get_session_messages(self, session_id: str):
+        import json
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT id, session_id, role, content, thoughts_json, checkpoint_id, order_index, created_at
+                FROM chat_messages
+                WHERE session_id = ?
+                ORDER BY order_index ASC, created_at ASC
+            """, (session_id,))
+            rows = cursor.fetchall()
+            messages = []
+            for row in rows:
+                item = dict(row)
+                if item.get("thoughts_json"):
+                    try:
+                        item["thoughts"] = json.loads(item["thoughts_json"])
+                    except:
+                        item["thoughts"] = []
+                else:
+                    item["thoughts"] = []
+                messages.append(item)
+            return messages
+
+    def delete_messages_from_and_after(self, session_id: str, target_message_id: str):
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT order_index FROM chat_messages WHERE id = ? AND session_id = ?", (target_message_id, session_id))
+            row = cursor.fetchone()
+            if row:
+                target_order = row["order_index"]
+                cursor.execute("DELETE FROM chat_messages WHERE session_id = ? AND order_index >= ?", (session_id, target_order))
+                cursor.execute("UPDATE chat_sessions SET updated_at = CURRENT_TIMESTAMP WHERE id = ?", (session_id,))
+                conn.commit()
+
+    def delete_messages_after(self, session_id: str, target_message_id: str):
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT order_index FROM chat_messages WHERE id = ? AND session_id = ?", (target_message_id, session_id))
+            row = cursor.fetchone()
+            if row:
+                target_order = row["order_index"]
+                cursor.execute("DELETE FROM chat_messages WHERE session_id = ? AND order_index > ?", (session_id, target_order))
+                cursor.execute("UPDATE chat_sessions SET updated_at = CURRENT_TIMESTAMP WHERE id = ?", (session_id,))
+                conn.commit()
 
 # Khởi tạo instance dùng chung
 db_service = DBService()

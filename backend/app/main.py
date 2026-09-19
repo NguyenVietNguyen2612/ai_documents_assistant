@@ -32,6 +32,8 @@ async def lifespan(app: FastAPI):
         print(f"[Sync] Bỏ qua đồng bộ hóa (Milvus chưa sẵn sàng): {e}\n")
         
     yield
+    from app.graph.rag_graph import close_checkpointer
+    await close_checkpointer()
 
 app = FastAPI(
     title="AI Document Assistant API",
