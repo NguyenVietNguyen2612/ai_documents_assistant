@@ -21,22 +21,35 @@ function DocumentList({ refreshKey }) {
         fetchDocuments()
     }, [refreshKey])
 
-    const handleDelete = (id) => {
-        if (window.confirm("Bạn có chắc chắn muốn xóa tài liệu này khỏi vector DB?")) {
-            fetch(`http://localhost:8001/documents/${id}`, {
+    const [docToDelete, setDocToDelete] = useState(null)
+    const [isDeleting, setIsDeleting] = useState(false)
+    const [deleteError, setDeleteError] = useState(null)
+
+    const handleDeleteClick = (document) => {
+        setDocToDelete(document)
+        setDeleteError(null)
+    }
+
+    const handleConfirmDelete = async () => {
+        if (!docToDelete) return
+        setIsDeleting(true)
+        setDeleteError(null)
+        try {
+            const res = await fetch(`http://localhost:8001/documents/${docToDelete.id}`, {
                 method: "DELETE",
             })
-                .then((response) => response.json())
-                .then((data) => {
-                    if (data.error) {
-                        alert("Lỗi: " + data.error);
-                    } else {
-                        fetchDocuments();
-                    }
-                })
-                .catch((error) => {
-                    console.error("Failed to delete document:", error)
-                })
+            const data = await res.json()
+            if (data.error) {
+                setDeleteError(data.error)
+            } else {
+                setDocToDelete(null)
+                fetchDocuments()
+            }
+        } catch (error) {
+            console.error("Failed to delete document:", error)
+            setDeleteError("Không thể kết nối đến máy chủ.")
+        } finally {
+            setIsDeleting(false)
         }
     }
 
@@ -75,7 +88,7 @@ function DocumentList({ refreshKey }) {
                         
                         <button 
                             className="delete-document-btn"
-                            onClick={() => handleDelete(document.id)}
+                            onClick={() => handleDeleteClick(document)}
                             style={{
                                 background: "transparent",
                                 border: "none",
@@ -91,6 +104,50 @@ function DocumentList({ refreshKey }) {
                     </div>
                 ))}
             </div>
+
+            {/* Hộp thoại xác nhận xóa tài liệu (Custom Confirmation Modal ở giữa màn hình) */}
+            {docToDelete && (
+                <div className="modal-overlay" onClick={() => !isDeleting && setDocToDelete(null)}>
+                    <div className="confirm-modal" onClick={(e) => e.stopPropagation()}>
+                        <div className="confirm-modal-header">
+                            <h3>Xác nhận xóa tài liệu</h3>
+                            <button 
+                                className="confirm-modal-close" 
+                                onClick={() => !isDeleting && setDocToDelete(null)}
+                            >
+                                ✕
+                            </button>
+                        </div>
+
+                        <p className="confirm-modal-body">
+                            Bạn có chắc chắn muốn xóa tài liệu <strong>"{docToDelete.name}"</strong> khỏi cơ sở dữ liệu Vector không?
+                        </p>
+
+                        {deleteError && (
+                            <div className="confirm-modal-error">
+                                {deleteError}
+                            </div>
+                        )}
+
+                        <div className="confirm-modal-actions">
+                            <button 
+                                className="modal-btn modal-btn-cancel" 
+                                onClick={() => setDocToDelete(null)}
+                                disabled={isDeleting}
+                            >
+                                Hủy bỏ
+                            </button>
+                            <button 
+                                className="modal-btn modal-btn-delete" 
+                                onClick={handleConfirmDelete}
+                                disabled={isDeleting}
+                            >
+                                {isDeleting ? "Đang xóa..." : "Xác nhận xóa"}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     )
 }

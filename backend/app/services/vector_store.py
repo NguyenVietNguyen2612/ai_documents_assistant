@@ -106,8 +106,9 @@ class VectorStore:
     def search(
         self,
         query_vector: list[float],
-        limit: int = 5,
+        limit: int = 15,
         document_name: str = None,
+        document_ids: list[str] = None,
     ):
         search_params = {
             "collection_name": self.collection_name,
@@ -122,8 +123,18 @@ class VectorStore:
             ],
         }
         
-        if document_name:
-            search_params["filter"] = f"document_name like '%{document_name}%'"
+        # 1. Ưu tiên lọc theo document_ids (chính xác và không phụ thuộc hoa/thường)
+        if document_ids and len(document_ids) > 0:
+            if len(document_ids) == 1:
+                search_params["filter"] = f"document_id == '{document_ids[0]}'"
+            else:
+                ids_str = ", ".join([f"'{d_id}'" for d_id in document_ids])
+                search_params["filter"] = f"document_id in [{ids_str}]"
+        # 2. Fallback nếu truyền chuỗi document_name trực tiếp
+        elif document_name:
+            doc_str = str(document_name).strip()
+            # Nới lỏng tìm kiếm cả chữ thường lẫn chữ hoa
+            search_params["filter"] = f"document_name like '%{doc_str}%' or document_name like '%{doc_str.lower()}%' or document_name like '%{doc_str.upper()}%'"
             
         return self.client.search(**search_params)
     

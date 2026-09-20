@@ -56,7 +56,6 @@ function Sidebar({
                                 onClick={() => onSelectSession && onSelectSession(sess.id)}
                                 title={sess.title}
                             >
-                                <span className="session-item-icon">💬</span>
                                 <span className="session-item-title">{sess.title}</span>
                                 <button
                                     className="session-delete-button"

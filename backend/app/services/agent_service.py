@@ -16,6 +16,15 @@ QUY TẮC HOẠT ĐỘNG:
 3. Khi trả lời, hãy tổng hợp thông tin từ ngữ cảnh trả về một cách rõ ràng, dễ hiểu và chuyên nghiệp.
 4. Nếu câu hỏi là giao tiếp thông thường (ví dụ: "Chào bạn", "Bạn có thể làm gì?"), bạn có thể trả lời trực tiếp mà KHÔNG CẦN gọi công cụ.
 
+QUY TẮC SUY LUẬN (CHAIN-OF-THOUGHT - TƯƠNG TỰ DEEPSEEK):
+Khi bạn chuẩn bị đưa ra câu trả lời cho người dùng (cả khi trả lời trực tiếp lẫn sau khi tra cứu tài liệu), bạn BẮT BUỘC phải mở đầu câu trả lời bằng cặp thẻ <think>...</think>.
+Bên trong khối <think>, hãy trình bày chi tiết và cụ thể toàn bộ quá trình bạn suy nghĩ và phân tích:
+- Phân tích câu hỏi của người dùng và các điểm cốt lõi cần giải đáp.
+- Đánh giá thông tin ngữ cảnh tìm được từ tài liệu (thông tin nào có sẵn, số liệu nào được tìm thấy, có điểm nào tài liệu chưa đề cập hay không).
+- Lập luận logic từng bước để đi đến kết luận và giải pháp.
+- Lên kế hoạch cấu trúc câu trả lời rõ ràng, mạch lạc, dễ hiểu.
+Sau khi đóng thẻ </think>, bạn mới viết nội dung câu trả lời chính thức gửi tới người dùng.
+
 QUY TẮC ĐỊNH DẠNG VĂN BẢN (CỰC KỲ QUAN TRỌNG - BẮT BUỘC TUÂN THỦ 100%):
 1. TRẢ VỀ VĂN BẢN THƯỜNG (PLAIN TEXT):
    - Tuyệt đối CẤM sử dụng cặp dấu sao ** để in đậm từ ngữ (ví dụ: KHÔNG VIẾT **lọc mềm**, PHẢI VIẾT lọc mềm).
@@ -63,18 +72,22 @@ QUY TẮC ĐỊNH DẠNG VĂN BẢN (CỰC KỲ QUAN TRỌNG - BẮT BUỘC TUÂ
 
         result = await graph.ainvoke({"messages": messages}, config=config)
         final_message = result["messages"][-1]
-        answer = final_message.content
+        raw_answer = final_message.content
 
-        if isinstance(answer, list):
-            text_parts = [part["text"] for part in answer if isinstance(part, dict) and "text" in part]
-            answer = "".join(text_parts) if text_parts else str(answer)
+        if isinstance(raw_answer, list):
+            text_parts = [part["text"] for part in raw_answer if isinstance(part, dict) and "text" in part]
+            raw_answer = "".join(text_parts) if text_parts else str(raw_answer)
+
+        import re
+        clean_answer = re.sub(r'<think>.*?</think>', '', raw_answer, flags=re.DOTALL).strip()
+        clean_answer = clean_answer.replace("**", "").replace("__", "")
 
         # Lấy checkpoint id sau khi hoàn thành
         new_state = await graph.aget_state(config)
         new_checkpoint_id = new_state.config["configurable"].get("checkpoint_id")
 
         return {
-            "answer": answer,
+            "answer": clean_answer,
             "session_id": session_id,
             "checkpoint_id": new_checkpoint_id,
             "context": ""
@@ -128,6 +141,12 @@ QUY TẮC ĐỊNH DẠNG VĂN BẢN (CỰC KỲ QUAN TRỌNG - BẮT BUỘC TUÂ
         # Lưu trữ danh sách suy luận để lưu vào DB
         thoughts_history: List[Dict[str, Any]] = []
         full_answer_parts: List[str] = []
+        full_thinking_parts: List[str] = []
+
+        # Trạng thái bóc tách khối suy nghĩ <think>...</think> (DeepSeek-style)
+        stream_buffer = ""
+        in_think_tag = False
+        think_ended = False
 
         # 1. Tiếp nhận câu hỏi
         short_q = (question[:60] + "...") if len(question) > 60 else question
@@ -237,10 +256,68 @@ QUY TẮC ĐỊNH DẠNG VĂN BẢN (CỰC KỲ QUAN TRỌNG - BẮT BUỘC TUÂ
                         additional = getattr(chunk, "additional_kwargs", {}) or {}
                         thinking_token = additional.get("thinking") or additional.get("thought")
                         if thinking_token:
+                            full_thinking_parts.append(thinking_token)
                             yield f"data: {json.dumps({'type': 'thought_token', 'content': thinking_token}, ensure_ascii=False)}\n\n"
 
-                        content = chunk.content
-                        if content:
+                        raw_content = chunk.content
+                        if not raw_content:
+                            continue
+
+                        chunk_text = ""
+                        if isinstance(raw_content, str):
+                            chunk_text = raw_content
+                        elif isinstance(raw_content, list):
+                            parts = []
+                            for p in raw_content:
+                                if isinstance(p, dict) and "text" in p:
+                                    parts.append(p["text"])
+                                elif isinstance(p, str):
+                                    parts.append(p)
+                            chunk_text = "".join(parts)
+
+                        if not chunk_text:
+                            continue
+
+                        stream_buffer += chunk_text
+
+                        # 1. Chưa vào thẻ <think> và chưa kết thúc think
+                        if not in_think_tag and not think_ended:
+                            if "<think>" in stream_buffer:
+                                _, after_open = stream_buffer.split("<think>", 1)
+                                in_think_tag = True
+                                stream_buffer = after_open
+                            elif len(stream_buffer) > 15:
+                                think_ended = True
+
+                        # 2. Đang trong thẻ <think> (Suy nghĩ chi tiết của mô hình)
+                        if in_think_tag:
+                            if "</think>" in stream_buffer:
+                                think_part, after_close = stream_buffer.split("</think>", 1)
+                                in_think_tag = False
+                                think_ended = True
+                                if think_part:
+                                    full_thinking_parts.append(think_part)
+                                    yield f"data: {json.dumps({'type': 'thought_token', 'content': think_part}, ensure_ascii=False)}\n\n"
+
+                                complete_think_text = "".join(full_thinking_parts).strip()
+                                reason_item = {
+                                    "type": "thought",
+                                    "step": "reasoning",
+                                    "content": complete_think_text
+                                }
+                                thoughts_history.append(reason_item)
+                                yield f"data: {json.dumps(reason_item, ensure_ascii=False)}\n\n"
+                                stream_buffer = after_close
+                            else:
+                                safe_cut = max(0, len(stream_buffer) - 9)
+                                if safe_cut > 0:
+                                    to_send = stream_buffer[:safe_cut]
+                                    stream_buffer = stream_buffer[safe_cut:]
+                                    full_thinking_parts.append(to_send)
+                                    yield f"data: {json.dumps({'type': 'thought_token', 'content': to_send}, ensure_ascii=False)}\n\n"
+
+                        # 3. Đã kết thúc thẻ <think>, xuất token câu trả lời chính thức
+                        if think_ended and stream_buffer:
                             if not first_token_sent:
                                 first_token_sent = True
                                 thought = {
@@ -251,23 +328,34 @@ QUY TẮC ĐỊNH DẠNG VĂN BẢN (CỰC KỲ QUAN TRỌNG - BẮT BUỘC TUÂ
                                 thoughts_history.append(thought)
                                 yield f"data: {json.dumps(thought, ensure_ascii=False)}\n\n"
 
-                            if isinstance(content, str):
-                                cleaned = content.replace("**", "").replace("__", "")
-                                if cleaned:
-                                    full_answer_parts.append(cleaned)
-                                    yield f"data: {json.dumps({'type': 'token', 'content': cleaned}, ensure_ascii=False)}\n\n"
-                            elif isinstance(content, list):
-                                for part in content:
-                                    if isinstance(part, dict) and "text" in part:
-                                        cleaned = part["text"].replace("**", "").replace("__", "")
-                                        if cleaned:
-                                            full_answer_parts.append(cleaned)
-                                            yield f"data: {json.dumps({'type': 'token', 'content': cleaned}, ensure_ascii=False)}\n\n"
-                                    elif isinstance(part, str):
-                                        cleaned = part.replace("**", "").replace("__", "")
-                                        if cleaned:
-                                            full_answer_parts.append(cleaned)
-                                            yield f"data: {json.dumps({'type': 'token', 'content': cleaned}, ensure_ascii=False)}\n\n"
+                            cleaned = stream_buffer.replace("**", "").replace("__", "")
+                            if cleaned:
+                                full_answer_parts.append(cleaned)
+                                yield f"data: {json.dumps({'type': 'token', 'content': cleaned}, ensure_ascii=False)}\n\n"
+                            stream_buffer = ""
+
+            # Xử lý phần còn tồn đọng trong buffer nếu kết thúc stream
+            if in_think_tag and stream_buffer:
+                full_thinking_parts.append(stream_buffer)
+                yield f"data: {json.dumps({'type': 'thought_token', 'content': stream_buffer}, ensure_ascii=False)}\n\n"
+                complete_think_text = "".join(full_thinking_parts).strip()
+                reason_item = {
+                    "type": "thought",
+                    "step": "reasoning",
+                    "content": complete_think_text
+                }
+                thoughts_history.append(reason_item)
+                yield f"data: {json.dumps(reason_item, ensure_ascii=False)}\n\n"
+            elif think_ended and stream_buffer:
+                cleaned = stream_buffer.replace("**", "").replace("__", "")
+                if cleaned:
+                    full_answer_parts.append(cleaned)
+                    yield f"data: {json.dumps({'type': 'token', 'content': cleaned}, ensure_ascii=False)}\n\n"
+            elif not think_ended and stream_buffer:
+                cleaned = stream_buffer.replace("**", "").replace("__", "")
+                if cleaned:
+                    full_answer_parts.append(cleaned)
+                    yield f"data: {json.dumps({'type': 'token', 'content': cleaned}, ensure_ascii=False)}\n\n"
 
             # 2. Hoàn tất toàn bộ luồng
             complete_thought = {
