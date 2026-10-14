@@ -2,6 +2,7 @@ from fastapi import APIRouter, UploadFile, File
 from app.services.document_service import DocumentService
 from app.services.vector_store import VectorStore
 from app.services.db_service import db_service
+from app.services.bm25_service import bm25_service
 import uuid
 
 router = APIRouter()
@@ -62,6 +63,9 @@ async def upload_document(
         vector_store.insert(data_to_insert)
         print(f"Inserted {len(data_to_insert)} chunks for {file.filename} into Vector DB.")
 
+        # Thêm các chunk vào chỉ mục BM25
+        bm25_service.add_documents(data_to_insert)
+
     return {
         "message": "File processed and uploaded successfully in-memory",
         "filename": file.filename
@@ -79,4 +83,7 @@ def delete_document(document_id: str):
     except Exception as e:
         print(f"Failed to delete from Milvus: {e}")
     
+    # Remove from BM25 index
+    bm25_service.remove_documents_by_id(document_id)
+
     return {"message": "Document and associated vector data deleted successfully"}

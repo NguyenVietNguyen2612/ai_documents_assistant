@@ -20,7 +20,7 @@ def make_retrieve_node(retriever):
 
         results = retriever.retrieve(
             query=question,
-            top_k=3,
+            top_k=10,
         )
 
         return {
@@ -117,13 +117,16 @@ def make_evaluate_node():
     return evaluate_node
 
 
-def make_agent_node(llm_service):
+def make_agent_node(decision_service):
 
     def agent_node(state):
 
         question = state["question"]
 
-        prompt = f"""
+        if hasattr(decision_service, "decide"):
+            decision: AgentDecision = decision_service.decide(question)
+        else:
+            prompt = f"""
 You are the decision-making agent of a RAG system.
 
 Your job is to decide whether the user's question
@@ -140,15 +143,12 @@ Only decide the next action.
 Question:
 {question}
 """
-
-        decision: AgentDecision = (
-            llm_service.generate_structured(
+            decision: AgentDecision = decision_service.generate_structured(
                 prompt,
                 response_model=AgentDecision,
             )
-        )
 
-        print("\n[Node: agent]")
+        print("\n[Node: agent - Laya Decision Router]")
 
         print(
             f"Action: {decision.action}"

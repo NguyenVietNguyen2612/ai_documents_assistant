@@ -14,6 +14,7 @@ def make_retrieve_tool(retriever: Retriever, context_builder: ContextBuilder):
         - query: Câu hỏi hoặc các từ khóa nội dung cần tìm kiếm trong tài liệu.
         - document_name (tùy chọn): Tên hoặc từ khóa gợi ý tên tài liệu (ví dụ: 'CS338', 'cs338', 'RAG'). Hệ thống tự động nới lỏng tìm kiếm, không phân biệt chữ hoa/thường, không phụ thuộc đuôi .pdf. Nếu người dùng không chỉ định tài liệu hoặc bạn muốn tìm rộng trên tất cả tài liệu, hãy để trống tham số này.
         """
+
         print(f"\n[Tool: Retrieve] Đang tìm kiếm truy vấn: '{query}' " + (f"(Gợi ý file: {document_name})" if document_name else "(Toàn bộ tài liệu)"))
         results = retriever.retrieve(query=query, top_k=15, document_name=document_name)
         
@@ -25,4 +26,13 @@ def make_retrieve_tool(retriever: Retriever, context_builder: ContextBuilder):
         print(f"[Tool: Retrieve] Đã tìm thấy ngữ cảnh ({len(context)} ký tự).")
         return context
         
+
+
+        results = retriever.retrieve(
+            query=query,
+            top_k=10,
+        )
+
+        return results
+
     return retrieve_documents
