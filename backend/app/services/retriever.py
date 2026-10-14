@@ -2,6 +2,7 @@ import re
 from typing import List, Dict, Any, Optional, Tuple
 from app.services.db_service import db_service
 from app.services.bm25_service import bm25_service as default_bm25_service
+from app.services.reranker_service import reranker_service as default_reranker_service
 
 
 class Retriever:
@@ -11,10 +12,12 @@ class Retriever:
         embedding_service,
         vector_store,
         bm25_service=None,
+        reranker_service=None,
     ):
         self.embedding_service = embedding_service
         self.vector_store = vector_store
         self.bm25_service = bm25_service or default_bm25_service
+        self.reranker_service = reranker_service or default_reranker_service
 
     def _resolve_document_ids(self, document_name: str) -> Tuple[List[str], List[str]]:
         """
@@ -168,19 +171,20 @@ class Retriever:
     def _execute_hybrid_search(
         self,
         query: str,
-        top_k: int = 15,
+        initial_k: int = 15,
         document_ids: Optional[List[str]] = None,
         document_name: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
+        """Giai đoạn 1: Thu hồi diện rộng (Recall) qua Vector + BM25 + RRF."""
         vector_hits = self.retrieve_vector(
             query=query,
-            top_k=top_k,
+            top_k=initial_k,
             document_ids=document_ids,
             document_name=document_name,
         )
         bm25_hits = self.retrieve_bm25(
             query=query,
-            top_k=top_k,
+            top_k=initial_k,
             document_ids=document_ids,
         )
 
@@ -188,24 +192,25 @@ class Retriever:
         print(f"[Retriever] BM25 Search (Lexical) returned {len(bm25_hits)} candidates.")
 
         if vector_hits and bm25_hits:
-            merged = self.rrf_merge(vector_hits, bm25_hits, top_k=top_k)
-            print(f"[Retriever] RRF Fusion merged into {len(merged)} candidates (top_k={top_k}).")
+            merged = self.rrf_merge(vector_hits, bm25_hits, top_k=initial_k)
+            print(f"[Retriever] RRF Fusion merged into {len(merged)} candidates.")
             return merged
         elif vector_hits:
-            return vector_hits[:top_k]
+            return vector_hits[:initial_k]
         elif bm25_hits:
-            return bm25_hits[:top_k]
+            return bm25_hits[:initial_k]
         return []
 
     def retrieve(
         self,
         query: str,
-        top_k: int = 15,
+        top_k: int = 3,
         document_name: Optional[str] = None,
     ):
         """
-        Tìm kiếm kết hợp Hybrid: Vector Search + BM25 với RRF Fusion,
-        hỗ trợ tìm kiếm theo tên tài liệu và tự động nới lỏng nếu không có kết quả.
+        Quy trình Two-stage Retrieval:
+        1. Giai đoạn 1 (Recall): Vector Search + BM25 Search kết hợp RRF gom rộng các candidates (10-15 chunks).
+        2. Giai đoạn 2 (Precision): Reranker (BGE base) chấm điểm sâu mối tương quan và chọn lọc ra Top K (mặc định 3) chunks tốt nhất.
         """
         matched_ids = []
         matched_names = []
@@ -216,22 +221,36 @@ class Retriever:
             else:
                 print(f"[Retriever] Document '{document_name}' not matched directly -> Relaxing filter to all documents.")
 
+        # Lấy rộng ứng viên ở Giai đoạn 1 (ít nhất 10 chunks hoặc gấp 3 lần top_k)
+        initial_k = max(10, top_k * 3)
+
         # Lần 1: Tìm kiếm Hybrid có lọc theo tài liệu đã resolve (nếu có)
-        hits = self._execute_hybrid_search(
+        candidates = self._execute_hybrid_search(
             query=query,
-            top_k=top_k,
+            initial_k=initial_k,
             document_ids=matched_ids if matched_ids else None,
             document_name=document_name if not matched_ids else None,
         )
 
         # Lần 2: NỚI LỎNG TOÀN DIỆN - Nếu có chỉ định document_name mà kết quả trống -> Tự động fallback sang tất cả tài liệu
-        if document_name and not hits:
+        if document_name and not candidates:
             print(f"[Retriever] Filter for '{document_name}' yielded 0 results -> Auto-fallback to ALL documents...")
-            hits = self._execute_hybrid_search(
+            candidates = self._execute_hybrid_search(
                 query=query,
-                top_k=top_k,
+                initial_k=initial_k,
                 document_ids=None,
                 document_name=None,
             )
 
-        return [hits]
+        # Giai đoạn 2: Rerank với BGE Base để chọn lọc ra đúng top_k (mặc định 3) candidates
+        if self.reranker_service and candidates:
+            final_hits = self.reranker_service.rerank(
+                query=query,
+                candidates=candidates,
+                top_k=top_k,
+            )
+        else:
+            final_hits = candidates[:top_k]
+
+        print(f"[Retriever] Final selected {len(final_hits)} chunks for context.")
+        return [final_hits]

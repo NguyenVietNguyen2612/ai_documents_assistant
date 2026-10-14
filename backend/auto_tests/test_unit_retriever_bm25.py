@@ -2,6 +2,7 @@ import pytest
 from unittest.mock import MagicMock
 from app.services.bm25_service import BM25Service
 from app.services.retriever import Retriever
+from app.services.reranker_service import RerankerService
 
 
 def test_bm25_service_index_and_search():
@@ -49,46 +50,77 @@ def test_bm25_service_add_and_remove():
     assert len(res_after_remove) == 0
 
 
-def test_retriever_rrf_and_top_10():
-    # Tạo mock cho embedding_service và vector_store
+def test_reranker_service_selects_top_3():
+    # Giả lập RerankerService với mô hình CrossEncoder BGE
+    reranker = RerankerService()
+    mock_model = MagicMock()
+    # Giả lập 5 ứng viên với các điểm số khác nhau từ BGE
+    mock_model.predict.return_value = [0.12, 0.95, 0.45, 0.88, 0.23]
+    reranker.model = mock_model
+    reranker._is_loaded = True
+
+    candidates = [
+        {"id": f"chunk_{i}", "entity": {"text": f"Nội dung chunk {i}"}}
+        for i in range(5)
+    ]
+
+    selected = reranker.rerank(
+        query="Truy vấn kiểm tra",
+        candidates=candidates,
+        top_k=3,
+    )
+
+    # Kiểm tra chỉ lấy ra đúng Top 3 candidates
+    assert len(selected) == 3
+    # Candidate có điểm cao nhất (0.95 ở vị trí 1) phải đứng đầu
+    assert selected[0]["id"] == "chunk_1"
+    assert selected[0]["rerank_score"] == 0.95
+    # Candidate có điểm cao thứ 2 (0.88 ở vị trí 3) phải đứng nhì
+    assert selected[1]["id"] == "chunk_3"
+    assert selected[1]["rerank_score"] == 0.88
+    # Candidate có điểm cao thứ 3 (0.45 ở vị trí 2) phải đứng ba
+    assert selected[2]["id"] == "chunk_2"
+    assert selected[2]["rerank_score"] == 0.45
+
+
+def test_retriever_pipeline_with_reranker_top_3():
     mock_embedding = MagicMock()
     mock_embedding.embed_chunks.return_value = [0.1] * 384
 
     mock_vector_store = MagicMock()
     # Giả lập 10 candidates từ Vector Search
     mock_vector_store.search.return_value = [[
-        {"id": f"v_{i}", "distance": 0.9 - i * 0.05, "entity": {"text": f"Vector chunk {i}", "document_name": "v.pdf", "page": 1}}
+        {"id": f"chunk_{i}", "distance": 0.9 - i * 0.05, "entity": {"text": f"Text {i}", "document_name": "doc.pdf", "page": 1}}
         for i in range(10)
     ]]
 
-    # Giả lập BM25 Service với 10 candidates
-    bm25 = BM25Service()
-    bm25_docs = [
-        {"id": f"v_{i}", "text": f"Hybrid chunk {i}", "document_id": "d", "document_name": "v.pdf", "page": 1, "chunk_index": i}
-        for i in range(5)
-    ] + [
-        {"id": f"b_{i}", "text": f"BM25 specific chunk {i}", "document_id": "d", "document_name": "b.pdf", "page": 1, "chunk_index": i}
-        for i in range(5)
-    ]
-    bm25.index_documents(bm25_docs)
+    # Giả lập RerankerService
+    reranker = RerankerService()
+    mock_model = MagicMock()
+    # Chấm điểm cao cho chunk_7, chunk_2, chunk_5
+    scores = [0.1] * 10
+    scores[7] = 0.99
+    scores[2] = 0.95
+    scores[5] = 0.90
+    mock_model.predict.return_value = scores
+    reranker.model = mock_model
+    reranker._is_loaded = True
 
     retriever = Retriever(
         embedding_service=mock_embedding,
         vector_store=mock_vector_store,
-        bm25_service=bm25,
+        reranker_service=reranker,
     )
 
-    # Thực hiện retrieve với top_k=10
-    results = retriever.retrieve("Hybrid chunk", top_k=10)
+    # Thực hiện retrieve với top_k=3
+    results = retriever.retrieve("Truy vấn", top_k=3)
 
-    # Kiểm tra kết quả trả về đúng định dạng danh sách lồng nhau [[...]]
     assert isinstance(results, list)
     assert len(results) == 1
     hits = results[0]
-    assert len(hits) == 10
+    assert len(hits) == 3
 
-    # Kiểm tra các hit đều có rrf_score và id
-    for hit in hits:
-        assert "id" in hit
-        assert "rrf_score" in hit
-        assert "entity" in hit
+    # Kiểm tra thứ tự do Reranker quyết định
+    assert hits[0]["id"] == "chunk_7"
+    assert hits[1]["id"] == "chunk_2"
+    assert hits[2]["id"] == "chunk_5"

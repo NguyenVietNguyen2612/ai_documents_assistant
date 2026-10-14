@@ -16,7 +16,7 @@ def make_retrieve_tool(retriever: Retriever, context_builder: ContextBuilder):
         """
 
         print(f"\n[Tool: Retrieve] Đang tìm kiếm truy vấn: '{query}' " + (f"(Gợi ý file: {document_name})" if document_name else "(Toàn bộ tài liệu)"))
-        results = retriever.retrieve(query=query, top_k=15, document_name=document_name)
+        results = retriever.retrieve(query=query, top_k=3, document_name=document_name)
         
         if not results or not results[0]:
             print("[Tool: Retrieve] Không tìm thấy kết quả.")

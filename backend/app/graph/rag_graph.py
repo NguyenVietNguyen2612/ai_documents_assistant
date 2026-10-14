@@ -12,6 +12,7 @@ from app.services.vector_store import VectorStore
 from app.services.retriever import Retriever
 from app.services.context_builder import ContextBuilder
 from app.services.bm25_service import bm25_service
+from app.services.reranker_service import reranker_service
 
 
 def create_agent_graph(llm, tools, checkpointer=None):
@@ -78,6 +79,7 @@ def _get_llm_and_tools():
             embedding_service=embedding_service,
             vector_store=vector_store,
             bm25_service=bm25_service,
+            reranker_service=reranker_service,
         )
         context_builder = ContextBuilder()
         retrieve_tool = make_retrieve_tool(retriever, context_builder)
