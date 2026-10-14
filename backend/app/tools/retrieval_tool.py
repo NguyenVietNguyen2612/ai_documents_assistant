@@ -25,14 +25,5 @@ def make_retrieve_tool(retriever: Retriever, context_builder: ContextBuilder):
         context = context_builder.build(results)
         print(f"[Tool: Retrieve] Đã tìm thấy ngữ cảnh ({len(context)} ký tự).")
         return context
-        
-
-
-        results = retriever.retrieve(
-            query=query,
-            top_k=10,
-        )
-
-        return results
 
     return retrieve_documents

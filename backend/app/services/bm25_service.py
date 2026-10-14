@@ -118,9 +118,15 @@ class BM25Service:
             self.bm25_model = None
         print(f"[BM25Service] Removed chunks for doc_id='{document_id}'. Remaining chunks: {len(self.documents)}.")
 
-    def search(self, query: str, top_k: int = 10) -> List[Dict[str, Any]]:
+    def search(
+        self,
+        query: str,
+        top_k: int = 10,
+        document_ids: Optional[List[str]] = None,
+    ) -> List[Dict[str, Any]]:
         """
         Tìm kiếm BM25 theo query và trả về Top K ứng viên có format tương thích với Milvus.
+        Hỗ trợ lọc theo document_ids nếu có.
         """
         if not self.bm25_model or not self.documents:
             return []
@@ -131,18 +137,25 @@ class BM25Service:
 
         scores = self.bm25_model.get_scores(tokens)
 
-        # Lọc các kết quả có điểm > 0 và sắp xếp giảm dần
+        # Lọc các kết quả có điểm > 0 và khớp với document_ids (nếu có)
+        filtered_indices = []
+        for i, score in enumerate(scores):
+            if score <= 0.0:
+                continue
+            if document_ids and self.documents[i].get("document_id") not in document_ids:
+                continue
+            filtered_indices.append(i)
+
+        # Sắp xếp giảm dần theo điểm số BM25
         ranked_indices = sorted(
-            range(len(scores)),
+            filtered_indices,
             key=lambda i: scores[i],
             reverse=True,
         )
 
         results = []
-        for idx in ranked_indices:
+        for idx in ranked_indices[:top_k]:
             score = scores[idx]
-            if score <= 0.0:
-                break
             doc = self.documents[idx]
             results.append({
                 "id": doc.get("id"),
@@ -156,8 +169,6 @@ class BM25Service:
                     "chunk_index": doc.get("chunk_index", 0),
                 },
             })
-            if len(results) >= top_k:
-                break
 
         return results
 

@@ -1,7 +1,6 @@
-
 import re
+from typing import List, Dict, Any, Optional, Tuple
 from app.services.db_service import db_service
-from typing import List, Dict, Any, Optional
 from app.services.bm25_service import bm25_service as default_bm25_service
 
 
@@ -17,7 +16,7 @@ class Retriever:
         self.vector_store = vector_store
         self.bm25_service = bm25_service or default_bm25_service
 
-    def _resolve_document_ids(self, document_name: str) -> tuple[list[str], list[str]]:
+    def _resolve_document_ids(self, document_name: str) -> Tuple[List[str], List[str]]:
         """
         Nới lỏng giới hạn tìm kiếm tên tài liệu:
         - Không phân biệt hoa / thường (case-insensitive).
@@ -78,38 +77,20 @@ class Retriever:
         unique_names = list(set(matched_names))
         return unique_ids, unique_names
 
-    def retrieve(
-        self,
-        query: str,
-        top_k: int = 15,
-        document_name: str = None,
-    ):
-        query_vector = self.embedding_service.embed_chunks(query)
-
-        matched_ids = []
-        matched_names = []
-        if document_name:
-            matched_ids, matched_names = self._resolve_document_ids(document_name)
-            if matched_names:
-                print(f"[Retriever] Resolved document '{document_name}' -> Matched: {matched_names}")
-            else:
-                print(f"[Retriever] Document '{document_name}' not matched directly -> Relaxing filter to all documents.")
-
-        # Lần 1: Tìm kiếm có lọc theo tài liệu đã resolve (nếu có)
-
     def retrieve_vector(
         self,
         query: str,
-        top_k: int = 10,
+        top_k: int = 15,
+        document_ids: Optional[List[str]] = None,
+        document_name: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
         """Dense Vector Search trên Milvus (Top K)."""
         query_vector = self.embedding_service.embed_chunks(query)
-
         results = self.vector_store.search(
             query_vector=query_vector,
             limit=top_k,
-            document_ids=matched_ids if matched_ids else None,
-            document_name=document_name if not matched_ids else None,
+            document_ids=document_ids,
+            document_name=document_name,
         )
         if results and len(results) > 0:
             return results[0]
@@ -118,18 +99,23 @@ class Retriever:
     def retrieve_bm25(
         self,
         query: str,
-        top_k: int = 10,
+        top_k: int = 15,
+        document_ids: Optional[List[str]] = None,
     ) -> List[Dict[str, Any]]:
         """Lexical Search dùng BM25 (Top K)."""
         if self.bm25_service:
-            return self.bm25_service.search(query=query, top_k=top_k)
+            return self.bm25_service.search(
+                query=query,
+                top_k=top_k,
+                document_ids=document_ids,
+            )
         return []
 
     @staticmethod
     def rrf_merge(
         vector_hits: List[Dict[str, Any]],
         bm25_hits: List[Dict[str, Any]],
-        top_k: int = 10,
+        top_k: int = 15,
         rrf_k: int = 60,
     ) -> List[Dict[str, Any]]:
         """
@@ -179,41 +165,73 @@ class Retriever:
 
         return merged_hits
 
-    def retrieve(
+    def _execute_hybrid_search(
         self,
         query: str,
-        top_k: int = 10,
-    ):
-        """
-        Tìm kiếm kết hợp Hybrid: Vector Search (Top 10) + BM25 (Top 10) với RRF Fusion.
-        """
-        vector_hits = self.retrieve_vector(query, top_k=top_k)
-        bm25_hits = self.retrieve_bm25(query, top_k=top_k)
+        top_k: int = 15,
+        document_ids: Optional[List[str]] = None,
+        document_name: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
+        vector_hits = self.retrieve_vector(
+            query=query,
+            top_k=top_k,
+            document_ids=document_ids,
+            document_name=document_name,
+        )
+        bm25_hits = self.retrieve_bm25(
+            query=query,
+            top_k=top_k,
+            document_ids=document_ids,
+        )
 
         print(f"[Retriever] Vector Search (Dense) returned {len(vector_hits)} candidates.")
         print(f"[Retriever] BM25 Search (Lexical) returned {len(bm25_hits)} candidates.")
 
+        if vector_hits and bm25_hits:
+            merged = self.rrf_merge(vector_hits, bm25_hits, top_k=top_k)
+            print(f"[Retriever] RRF Fusion merged into {len(merged)} candidates (top_k={top_k}).")
+            return merged
+        elif vector_hits:
+            return vector_hits[:top_k]
+        elif bm25_hits:
+            return bm25_hits[:top_k]
+        return []
 
-        # Lần 2: NỚI LỎNG TOÀN DIỆN - Nếu lọc theo document_name mà không ra kết quả
-        if document_name and (not results or not results[0]):
+    def retrieve(
+        self,
+        query: str,
+        top_k: int = 15,
+        document_name: Optional[str] = None,
+    ):
+        """
+        Tìm kiếm kết hợp Hybrid: Vector Search + BM25 với RRF Fusion,
+        hỗ trợ tìm kiếm theo tên tài liệu và tự động nới lỏng nếu không có kết quả.
+        """
+        matched_ids = []
+        matched_names = []
+        if document_name:
+            matched_ids, matched_names = self._resolve_document_ids(document_name)
+            if matched_names:
+                print(f"[Retriever] Resolved document '{document_name}' -> Matched: {matched_names}")
+            else:
+                print(f"[Retriever] Document '{document_name}' not matched directly -> Relaxing filter to all documents.")
+
+        # Lần 1: Tìm kiếm Hybrid có lọc theo tài liệu đã resolve (nếu có)
+        hits = self._execute_hybrid_search(
+            query=query,
+            top_k=top_k,
+            document_ids=matched_ids if matched_ids else None,
+            document_name=document_name if not matched_ids else None,
+        )
+
+        # Lần 2: NỚI LỎNG TOÀN DIỆN - Nếu có chỉ định document_name mà kết quả trống -> Tự động fallback sang tất cả tài liệu
+        if document_name and not hits:
             print(f"[Retriever] Filter for '{document_name}' yielded 0 results -> Auto-fallback to ALL documents...")
-            results = self.vector_store.search(
-                query_vector=query_vector,
-                limit=top_k,
+            hits = self._execute_hybrid_search(
+                query=query,
+                top_k=top_k,
                 document_ids=None,
                 document_name=None,
             )
 
-        return results
-
-        if vector_hits and bm25_hits:
-            merged = self.rrf_merge(vector_hits, bm25_hits, top_k=top_k)
-            print(f"[Retriever] RRF Fusion merged into {len(merged)} candidates (top_k={top_k}).")
-            return [merged]
-        elif vector_hits:
-            return [vector_hits[:top_k]]
-        elif bm25_hits:
-            return [bm25_hits[:top_k]]
-        else:
-            return [[]]
-
+        return [hits]
