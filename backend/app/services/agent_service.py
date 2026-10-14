@@ -10,10 +10,16 @@ class AgentService:
     SYSTEM_PROMPT = """Bạn là một Trợ lý AI thông minh chuyên phân tích tài liệu (AI Documents Assistant).
 Nhiệm vụ của bạn là giải đáp các thắc mắc của người dùng dựa trên tài liệu đã tải lên.
 
-QUY TẮC HOẠT ĐỘNG:
-1. Luôn sử dụng công cụ `retrieve_documents` ĐẦU TIÊN để tìm kiếm ngữ cảnh nếu câu hỏi liên quan đến tài liệu, số liệu, hoặc thông tin cụ thể.
-2. Tuyệt đối không tự bịa ra thông tin. Nếu công cụ trả về "Không tìm thấy", hãy thành thật nói rằng tài liệu không đề cập đến vấn đề này.
-3. Khi trả lời, hãy tổng hợp thông tin từ ngữ cảnh trả về một cách rõ ràng, dễ hiểu và chuyên nghiệp.
+BỘ CÔNG CỤ CỦA BẠN (MULTI-TOOL):
+1. `retrieve_documents`: Tìm kiếm chi tiết ngữ cảnh trong tài liệu (Hybrid Search: Vector + BM25 + Reranker). Luôn ưu tiên dùng khi hỏi về thông tin cụ thể, định nghĩa, kiến trúc, thực nghiệm.
+2. `list_uploaded_documents`: Liệt kê tất cả các file tài liệu hiện có trong hệ thống kèm dung lượng và số lượng phân đoạn. Dùng khi người dùng hỏi về danh sách file đã tải lên hoặc khi bạn cần biết tên file.
+3. `get_document_overview`: Lấy cấu trúc đề mục (mục lục) và nội dung mở đầu/kết luận của một tài liệu. Dùng khi người dùng yêu cầu tóm tắt tổng quan một tài liệu hoặc hỏi bố cục toàn bài.
+4. `calculate_metrics`: Máy tính toán học chính xác. Dùng khi cần tính toán số liệu, độ chênh lệch, tỷ lệ phần trăm từ các con số trong tài liệu.
+
+QUY TẮC HOẠT ĐỘNG & CORRECTIVE RAG:
+1. Luôn sử dụng công cụ phù hợp ĐẦU TIÊN nếu câu hỏi liên quan đến tài liệu hoặc số liệu.
+2. CƠ CHẾ CORRECTIVE RAG (Tự đánh giá & Viết lại truy vấn): Nếu kết quả từ `retrieve_documents` có cảnh báo độ khớp thấp hoặc chưa chứa đủ thông tin cần thiết, bạn HÃY TỰ ĐỘNG gọi lại `retrieve_documents` với từ khóa được viết lại (Query Rewriting: dùng thuật ngữ tiếng Anh chuyên ngành, từ đồng nghĩa hoặc bỏ lọc tên file).
+3. Tuyệt đối không tự bịa ra thông tin. Nếu sau khi thử tìm kiếm lại vẫn không có thông tin, hãy thành thật nói rằng tài liệu không đề cập đến vấn đề này.
 4. Nếu câu hỏi là giao tiếp thông thường (ví dụ: "Chào bạn", "Bạn có thể làm gì?"), bạn có thể trả lời trực tiếp mà KHÔNG CẦN gọi công cụ.
 
 QUY TẮC SUY LUẬN (CHAIN-OF-THOUGHT - TƯƠNG TỰ DEEPSEEK):
@@ -167,20 +173,34 @@ QUY TẮC ĐỊNH DẠNG VĂN BẢN (CỰC KỲ QUAN TRỌNG - BẮT BUỘC TUÂ
                 name = event.get("name", "")
                 data = event.get("data", {})
 
+                # Khi Laya Decision Router (System 1) hoàn tất phân loại
+                if event_type == "on_chain_end" and name == "router":
+                    output = data.get("output", {}) or {}
+                    r_action = output.get("route_action", "retrieve") if isinstance(output, dict) else "retrieve"
+                    r_reason = output.get("route_reason", "") if isinstance(output, dict) else ""
+                    action_label = "Tra cứu & Phân tích tài liệu (ReAct)" if r_action == "retrieve" else "Phản hồi trực tiếp (Fast-path)"
+                    router_thought = {
+                        "type": "thought",
+                        "step": "router",
+                        "content": f"Laya Decision Router: Quyết định '{r_action}' -> {action_label}. ({r_reason})"
+                    }
+                    thoughts_history.append(router_thought)
+                    yield f"data: {json.dumps(router_thought, ensure_ascii=False)}\n\n"
+
                 # Khi Agent bắt đầu vòng lặp tư duy
-                if event_type == "on_chain_start" and name == "agent":
+                elif event_type == "on_chain_start" and name == "agent":
                     iteration += 1
                     if iteration == 1:
                         thought = {
                             "type": "thought",
                             "step": "analyze",
-                            "content": "Đang phân tích câu hỏi để quyết định xem có cần tra cứu tài liệu hay trả lời trực tiếp..."
+                            "content": "Đang phân tích yêu cầu và lựa chọn công cụ xử lý tối ưu..."
                         }
                     else:
                         thought = {
                             "type": "thought",
                             "step": "synthesize",
-                            "content": "Đang tổng hợp thông tin từ ngữ cảnh tài liệu vừa tra cứu để chuẩn bị câu trả lời..."
+                            "content": f"Vòng lặp ReAct #{iteration}: Đang đánh giá ngữ cảnh thu được (Corrective RAG) để tổng hợp hoặc tra cứu bổ sung..."
                         }
                     thoughts_history.append(thought)
                     yield f"data: {json.dumps(thought, ensure_ascii=False)}\n\n"
@@ -189,12 +209,17 @@ QUY TẮC ĐỊNH DẠNG VĂN BẢN (CỰC KỲ QUAN TRỌNG - BẮT BUỘC TUÂ
                 elif event_type == "on_chat_model_end":
                     output = data.get("output")
                     tool_calls = getattr(output, "tool_calls", None) or []
-                    if tool_calls and iteration == 1:
+                    if tool_calls:
                         tool_names = ", ".join([t.get("name", "") for t in tool_calls])
+                        step_msg = (
+                            f"Quyết định kích hoạt công cụ: [{tool_names}]."
+                            if iteration == 1
+                            else f"Corrective RAG: Kích hoạt bổ sung công cụ [{tool_names}] để làm giàu thông tin."
+                        )
                         thought = {
                             "type": "thought",
                             "step": "decision",
-                            "content": f"Xác định câu hỏi liên quan đến tài liệu. Quyết định kích hoạt công cụ: [{tool_names}]."
+                            "content": step_msg
                         }
                         thoughts_history.append(thought)
                         yield f"data: {json.dumps(thought, ensure_ascii=False)}\n\n"
@@ -210,12 +235,22 @@ QUY TẮC ĐỊNH DẠNG VĂN BẢN (CỰC KỲ QUAN TRỌNG - BẮT BUỘC TUÂ
                 # Khi Agent kích hoạt Tool
                 elif event_type == "on_tool_start":
                     tool_input = data.get("input", {})
-                    query = tool_input.get("query", "") if isinstance(tool_input, dict) else str(tool_input)
-                    doc_name = tool_input.get("document_name") if isinstance(tool_input, dict) else None
-
-                    thought_msg = f"Đang tra cứu vector database với từ khóa: '{query}'"
-                    if doc_name:
-                        thought_msg += f" (lọc tài liệu: {doc_name})"
+                    if name == "retrieve_documents":
+                        query = tool_input.get("query", "") if isinstance(tool_input, dict) else str(tool_input)
+                        doc_name = tool_input.get("document_name") if isinstance(tool_input, dict) else None
+                        thought_msg = f"Đang tra cứu Hybrid Search (Milvus + BM25 + BGE Reranker) với truy vấn: '{query}'"
+                        if doc_name:
+                            thought_msg += f" (lọc tài liệu: {doc_name})"
+                    elif name == "list_uploaded_documents":
+                        thought_msg = "Đang truy xuất danh sách toàn bộ tài liệu hiện có trong hệ thống..."
+                    elif name == "get_document_overview":
+                        doc_name = tool_input.get("document_name", "") if isinstance(tool_input, dict) else str(tool_input)
+                        thought_msg = f"Đang trích xuất mục lục và tổng quan tài liệu: '{doc_name}'..."
+                    elif name == "calculate_metrics":
+                        expr = tool_input.get("expression", "") if isinstance(tool_input, dict) else str(tool_input)
+                        thought_msg = f"Đang tính toán biểu thức số học: `{expr}`..."
+                    else:
+                        thought_msg = f"Đang thực thi công cụ `{name}`..."
 
                     thought = {
                         "type": "thought",
@@ -230,12 +265,25 @@ QUY TẮC ĐỊNH DẠNG VĂN BẢN (CỰC KỲ QUAN TRỌNG - BẮT BUỘC TUÂ
                 elif event_type == "on_tool_end":
                     output = data.get("output", "")
                     out_content = getattr(output, "content", str(output))
-                    has_found = "Không tìm thấy" not in out_content
-                    if has_found:
-                        doc_count = out_content.count("[Tài liệu:") if "[Tài liệu:" in out_content else 1
-                        result_msg = f"Đã tìm thấy {doc_count} đoạn ngữ cảnh phù hợp từ tài liệu. Đang nạp vào bộ nhớ..."
+                    if name == "retrieve_documents":
+                        has_found = "Không tìm thấy thông tin" not in out_content
+                        if has_found:
+                            doc_count = out_content.count("[Tài liệu:") if "[Tài liệu:" in out_content else 1
+                            has_low_conf = "[ĐÁNH GIÁ CORRECTIVE RAG]" in out_content
+                            result_msg = f"Đã tìm thấy {doc_count} đoạn ngữ cảnh phù hợp nhất sau khi Rerank."
+                            if has_low_conf:
+                                result_msg += " (Điểm tương quan thấp -> kích hoạt đánh giá Corrective RAG)."
+                        else:
+                            result_msg = "Không tìm thấy đoạn văn bản khớp trực tiếp -> Gợi ý Agent tự động viết lại truy vấn (Query Rewriting)."
+                    elif name == "list_uploaded_documents":
+                        doc_count = out_content.count("[Tài liệu:")
+                        result_msg = f"Đã lấy danh sách {doc_count} tài liệu trong kho lưu trữ."
+                    elif name == "get_document_overview":
+                        result_msg = "Đã trích xuất cấu trúc đề mục và nội dung tổng quan của tài liệu."
+                    elif name == "calculate_metrics":
+                        result_msg = out_content
                     else:
-                        result_msg = "Không tìm thấy đoạn văn bản trực tiếp nào khớp trong tài liệu."
+                        result_msg = f"Công cụ `{name}` đã hoàn tất thực thi."
 
                     thought = {
                         "type": "thought",
@@ -245,6 +293,7 @@ QUY TẮC ĐỊNH DẠNG VĂN BẢN (CỰC KỲ QUAN TRỌNG - BẮT BUỘC TUÂ
                     thoughts_history.append(thought)
                     yield f"data: {json.dumps(thought, ensure_ascii=False)}\n\n"
                     yield f"data: {json.dumps({'type': 'tool_result', 'tool': name, 'summary': result_msg}, ensure_ascii=False)}\n\n"
+
 
                 # Khi LLM stream từng token
                 elif event_type == "on_chat_model_stream":

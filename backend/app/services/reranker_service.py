@@ -1,3 +1,4 @@
+import math
 import os
 from typing import List, Dict, Any, Optional
 
@@ -15,6 +16,20 @@ class RerankerService:
         )
         self.model = None
         self._is_loaded = False
+
+    @staticmethod
+    def normalize_score(raw_score: float) -> float:
+        """
+        Chuẩn hóa điểm số về thang [0.0, 1.0]:
+        - Nếu điểm đã nằm trong khoảng [0.0, 1.0] (xác suất hoặc Cosine/RRF), giữ nguyên.
+        - Nếu điểm là raw logit nằm ngoài [0.0, 1.0] (từ Cross-Encoder), áp dụng hàm Sigmoid.
+        """
+        val = float(raw_score)
+        if 0.0 <= val <= 1.0:
+            return round(val, 4)
+        # Áp dụng Sigmoid cho raw logits âm hoặc > 1.0
+        clamped = max(-20.0, min(20.0, val))
+        return round(1.0 / (1.0 + math.exp(-clamped)), 4)
 
     def _ensure_model_loaded(self):
         """Lazy load mô hình để tối ưu thời gian khởi động ứng dụng."""
@@ -69,10 +84,12 @@ class RerankerService:
             scored_candidates = []
             for i, c in enumerate(candidates):
                 item = dict(c)
-                score = float(scores[i])
-                item["rerank_score"] = score
-                item["score"] = score
-                item["distance"] = score
+                raw_score = float(scores[i])
+                norm_score = self.normalize_score(raw_score)
+                item["rerank_score"] = raw_score
+                item["normalized_score"] = norm_score
+                item["score"] = raw_score
+                item["distance"] = raw_score
                 scored_candidates.append(item)
 
             # Sắp xếp giảm dần theo điểm rerank
@@ -92,3 +109,4 @@ class RerankerService:
 
 # Singleton instance dùng chung trong hệ thống
 reranker_service = RerankerService()
+

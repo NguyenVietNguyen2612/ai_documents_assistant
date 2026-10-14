@@ -15,11 +15,12 @@ function formatPlainText(text) {
 
 const STEP_CONFIG = {
     receive: { label: "Tiếp nhận câu hỏi", bg: "#eef2ff", color: "#4338ca", border: "#c7d2fe" },
+    router: { label: "Laya Router (System 1)", bg: "#fdf4ff", color: "#a21caf", border: "#f5d0fe" },
     analyze: { label: "Phân tích yêu cầu", bg: "#f5f3ff", color: "#6d28d9", border: "#ddd6fe" },
     decision: { label: "Quyết định xử lý", bg: "#f0f9ff", color: "#0369a1", border: "#bae6fd" },
-    tool_call: { label: "Truy vấn tài liệu", bg: "#eff6ff", color: "#1d4ed8", border: "#bfdbfe" },
-    tool_result: { label: "Ngữ cảnh tìm được", bg: "#ecfdf5", color: "#047857", border: "#a7f3d0" },
-    synthesize: { label: "Tổng hợp thông tin", bg: "#fffbeb", color: "#b45309", border: "#fde68a" },
+    tool_call: { label: "Kích hoạt công cụ", bg: "#eff6ff", color: "#1d4ed8", border: "#bfdbfe" },
+    tool_result: { label: "Kết quả công cụ", bg: "#ecfdf5", color: "#047857", border: "#a7f3d0" },
+    synthesize: { label: "Corrective RAG & Tổng hợp", bg: "#fffbeb", color: "#b45309", border: "#fde68a" },
     responding: { label: "Soạn câu trả lời", bg: "#faf5ff", color: "#7e22ce", border: "#f3e8ff" },
     reasoning: { label: "Suy nghĩ của mô hình", bg: "#f8fafc", color: "#334155", border: "#cbd5e1" },
     complete: { label: "Hoàn tất suy luận", bg: "#f0fdf4", color: "#15803d", border: "#bbf7d0" },

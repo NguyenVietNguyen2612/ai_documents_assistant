@@ -1,24 +1,69 @@
+import os
+from app.services.reranker_service import RerankerService
+
+
 class ContextBuilder:
+    """
+    Xây dựng ngữ cảnh cho Agent từ danh sách chunks thu hồi được,
+    đồng thời chuẩn hóa điểm tin cậy về thang [0.00 - 1.00] cho cơ chế Corrective RAG:
+    - Cao (>= 0.70): Ngữ cảnh khớp rất tốt.
+    - Trung bình (0.40 - 0.69): Ngữ cảnh có liên quan một phần.
+    - Thấp (< 0.40): Ngữ cảnh độ tin cậy thấp -> Kích hoạt cảnh báo Corrective RAG (Query Rewriting).
+    """
+
+    HIGH_CONFIDENCE_THRESHOLD = float(os.getenv("RAG_HIGH_CONFIDENCE_THRESHOLD", "0.70"))
+    LOW_CONFIDENCE_THRESHOLD = float(os.getenv("RAG_CONFIDENCE_THRESHOLD", "0.40"))
 
     def build(self, results) -> str:
+        if not results or not results[0]:
+            return ""
 
         contexts = []
+        max_norm_score = None
 
         for i, result in enumerate(
             results[0],
             start=1,
         ):
+            entity = result.get("entity", {})
+            doc_name = entity.get("document_name", "Unknown")
+            page = entity.get("page", 1)
+            text = entity.get("text", "")
 
-            entity = result["entity"]
+            raw_score = result.get(
+                "normalized_score",
+                result.get("rerank_score", result.get("score", result.get("distance"))),
+            )
+            score_str = ""
+            if raw_score is not None:
+                norm_score = RerankerService.normalize_score(float(raw_score))
+                if norm_score >= self.HIGH_CONFIDENCE_THRESHOLD:
+                    level = "Cao"
+                elif norm_score >= self.LOW_CONFIDENCE_THRESHOLD:
+                    level = "Trung bình"
+                else:
+                    level = "Thấp"
+                score_str = f" | Độ tin cậy: {norm_score:.2f}/1.00 ({level})"
+                if max_norm_score is None or norm_score > max_norm_score:
+                    max_norm_score = norm_score
 
-            context = f"""
-[Source {i}]
-Document: {entity["document_name"]}
-Page: {entity["page"]}
+            context = f"""[Source {i}] [Tài liệu: {doc_name}] (Trang {page}{score_str})
+Document: {doc_name}
+Page: {page}
 
-{entity["text"]}
+{text}
 """
-
             contexts.append(context)
 
-        return "\n".join(contexts)
+        joined_context = "\n".join(contexts)
+
+        # Corrective RAG: Nếu điểm chuẩn hóa cao nhất thấp hơn ngưỡng 0.40 -> Cảnh báo Agent viết lại truy vấn
+        if max_norm_score is not None and max_norm_score < self.LOW_CONFIDENCE_THRESHOLD:
+            joined_context += (
+                f"\n[ĐÁNH GIÁ CORRECTIVE RAG]: Độ tin cậy ngữ cảnh cao nhất đạt {max_norm_score:.2f}/1.00 "
+                f"(thấp hơn ngưỡng chuẩn {self.LOW_CONFIDENCE_THRESHOLD:.2f}). "
+                "Hãy kiểm tra kỹ xem ngữ cảnh trên có thực sự trả lời đúng câu hỏi không. "
+                "Nếu chưa đủ thông tin, hãy gọi lại công cụ `retrieve_documents` với từ khóa khác (Query Rewriting - dùng từ đồng nghĩa hoặc thuật ngữ tiếng Anh tương ứng)."
+            )
+
+        return joined_context

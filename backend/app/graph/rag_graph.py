@@ -3,59 +3,107 @@ import aiosqlite
 from langgraph.graph import StateGraph, START, END
 from langgraph.prebuilt import ToolNode, tools_condition
 from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain_core.messages import HumanMessage, ToolMessage, SystemMessage
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
 from app.graph.state import AgentState
-from app.tools.retrieval_tool import make_retrieve_tool
+from app.tools.retrieval_tool import make_retrieve_tool, make_agent_tools
 from app.services.embedding_service import EmbeddingService
 from app.services.vector_store import VectorStore
 from app.services.retriever import Retriever
 from app.services.context_builder import ContextBuilder
 from app.services.bm25_service import bm25_service
 from app.services.reranker_service import reranker_service
+from app.services.laya_service import laya_service, LayaDecisionService
 
 
-def create_agent_graph(llm, tools, checkpointer=None):
+def _count_current_turn_tool_calls(messages) -> int:
+    """Đếm số lần gọi tool chỉ trong lượt hỏi hiện tại (tính từ HumanMessage mới nhất)."""
+    count = 0
+    for msg in reversed(messages):
+        if isinstance(msg, HumanMessage):
+            break
+        if isinstance(msg, ToolMessage):
+            count += 1
+    return count
+
+
+def _extract_latest_question(messages) -> str:
+    """Lấy nội dung câu hỏi mới nhất của người dùng."""
+    for msg in reversed(messages):
+        if isinstance(msg, HumanMessage):
+            content = msg.content
+            if isinstance(content, str):
+                return content
+            elif isinstance(content, list):
+                return " ".join(
+                    p.get("text", "") if isinstance(p, dict) else str(p)
+                    for p in content
+                )
+            return str(content)
+    return ""
+
+
+def create_agent_graph(llm, tools, checkpointer=None, decision_service: LayaDecisionService = None):
     builder = StateGraph(AgentState)
-    
-    # Ràng buộc công cụ vào LLM
+    router_service = decision_service or laya_service
+
+    # Ràng buộc bộ công cụ Multi-Tool vào LLM
     llm_with_tools = llm.bind_tools(tools)
-    
-    # Định nghĩa Agent Node
+
+    # 1. Định nghĩa Router Node (Laya System-1 Decision Model)
+    def router_node(state: AgentState):
+        messages = state.get("messages", [])
+        question = _extract_latest_question(messages)
+        decision = router_service.decide(question)
+        print(f"\n[Node: router - Laya Decision] Action: {decision.action} | Reason: {decision.reason}")
+        return {
+            "route_action": decision.action,
+            "route_reason": decision.reason,
+        }
+
+    # 2. Định nghĩa Agent Node (ReAct + Corrective RAG)
     def agent_node(state: AgentState):
         messages = state["messages"]
-        
-        # Đếm số lần công cụ đã được gọi (dựa trên số ToolMessage)
-        from langchain_core.messages import ToolMessage, SystemMessage
-        tool_calls_count = sum(1 for m in messages if isinstance(m, ToolMessage))
-        
+        route_action = state.get("route_action", "retrieve")
+
+        # Đếm số lần công cụ đã được gọi trong lượt câu hỏi hiện tại
+        tool_calls_count = _count_current_turn_tool_calls(messages)
+
         if tool_calls_count >= 3:
-            print("[Agent] Đã đạt giới hạn 3 lần tìm kiếm. Ép buộc trả lời...")
-            # Dùng LLM nguyên thủy (không bind tool) để ép nó phải trả lời bằng chữ
+            print("[Agent] Đã đạt giới hạn 3 lần gọi công cụ trong lượt này. Ép buộc tổng hợp trả lời...")
             forced_response = llm.invoke(messages + [
-                SystemMessage(content="Bạn đã đạt giới hạn 3 lần tìm kiếm tài liệu. BẮT BUỘC KHÔNG TÌM KIẾM THÊM. Hãy mở đầu bằng khối <think>...</think> để phân tích tổng hợp tài liệu, sau đó đưa ra câu trả lời cuối cùng. LƯU Ý BẮT BUỘC: Không dùng các ký hiệu Markdown như **, ##. Nếu phân cấp hoặc liệt kê, chỉ dùng -, +, . hoặc số thứ tự ở đầu dòng.")
+                SystemMessage(content="Bạn đã đạt giới hạn tối đa 3 lần tra cứu công cụ cho câu hỏi này. BẮT BUỘC KHÔNG GỌI CÔNG CỤ THÊM. Hãy mở đầu bằng khối <think>...</think> để phân tích tổng hợp toàn bộ dữ liệu đã thu thập được, sau đó đưa ra câu trả lời cuối cùng. LƯU Ý BẮT BUỘC: Không dùng các ký hiệu Markdown như **, ##. Nếu phân cấp hoặc liệt kê, chỉ dùng -, +, . hoặc số thứ tự ở đầu dòng.")
             ])
             return {"messages": [forced_response]}
-            
-        # LLM tự động đọc lịch sử chat và quyết định gọi tool hay trả lời trực tiếp
+
+        # Nếu Laya Router (System 1) phân loại là câu giao tiếp/trả lời trực tiếp ở bước đầu tiên
+        if route_action == "answer" and tool_calls_count == 0:
+            print("[Agent] Laya Router chỉ định 'answer' -> Phản hồi trực tiếp không qua Tool.")
+            direct_response = llm.invoke(messages)
+            return {"messages": [direct_response]}
+
+        # Ngược lại: Chạy vòng lặp ReAct với bộ công cụ Multi-Tool
         response = llm_with_tools.invoke(messages)
         return {"messages": [response]}
-        
+
+    builder.add_node("router", router_node)
     builder.add_node("agent", agent_node)
-    
-    # Định nghĩa Tool Node (thực thi tool)
+
+    # Định nghĩa Tool Node (thực thi bộ công cụ)
     tool_node = ToolNode(tools)
     builder.add_node("tools", tool_node)
-    
-    # Cấu hình luồng (Graph)
-    builder.add_edge(START, "agent")
-    
+
+    # Cấu hình luồng (Graph): START -> router -> agent <-> tools -> END
+    builder.add_edge(START, "router")
+    builder.add_edge("router", "agent")
+
     # Cạnh điều kiện: Nếu LLM muốn gọi tool -> Sang node tools, nếu không -> END
     builder.add_conditional_edges("agent", tools_condition)
-    
-    # Sau khi thực thi tool xong, trả kết quả về lại cho Agent phân tích tiếp
+
+    # Sau khi thực thi tool xong, trả kết quả về lại cho Agent phân tích tiếp (Corrective RAG loop)
     builder.add_edge("tools", "agent")
-    
+
     return builder.compile(checkpointer=checkpointer)
 
 
@@ -82,8 +130,7 @@ def _get_llm_and_tools():
             reranker_service=reranker_service,
         )
         context_builder = ContextBuilder()
-        retrieve_tool = make_retrieve_tool(retriever, context_builder)
-        _tools = [retrieve_tool]
+        _tools = make_agent_tools(retriever, context_builder)
 
         model_name = os.environ.get("GEMINI_MODEL", "gemini-3.1-flash-lite")
         _llm = ChatGoogleGenerativeAI(
@@ -102,7 +149,12 @@ async def get_agent_graph():
         _checkpointer = AsyncSqliteSaver(_conn)
         await _checkpointer.setup()
         llm, tools = _get_llm_and_tools()
-        _graph = create_agent_graph(llm, tools, checkpointer=_checkpointer)
+        _graph = create_agent_graph(
+            llm,
+            tools,
+            checkpointer=_checkpointer,
+            decision_service=laya_service,
+        )
     return _graph
 
 
@@ -113,3 +165,4 @@ async def close_checkpointer():
         _conn = None
         _graph = None
         _checkpointer = None
+
