@@ -76,11 +76,17 @@ def test_laya_fast_conversational_heuristic():
 
 
 def test_multi_tools_and_corrective_rag():
-    from app.tools.retrieval_tool import (
+    # Test import từ app.tools và từ các module riêng biệt
+    from app.tools import (
         make_calculator_tool,
         make_document_overview_tool,
         make_list_documents_tool,
+        make_retrieve_tool,
+        make_agent_tools,
     )
+    from app.tools.calculator_tool import make_calculator_tool as make_calc_direct
+    from app.tools.retrieve_tool import make_retrieve_tool as make_retrieve_direct
+    from app.tools.retrieval_tool import make_agent_tools as make_agent_tools_compat
     from app.services.context_builder import ContextBuilder
     from app.services.bm25_service import BM25Service
 
