@@ -1,15 +1,11 @@
 import { useState, useRef, useEffect } from "react"
 import { sendMessageStream, getSessionMessages } from "../services/chatAPI"
+import MarkdownViewer from "./MarkdownViewer"
+import PDFModal from "./PDFModal"
 
 function formatPlainText(text) {
     if (!text) return ""
     return text
-        // Xóa hoàn toàn các cặp dấu ** và __
-        .replace(/\*\*/g, "")
-        .replace(/__/g, "")
-        // Xóa các dấu # ở đầu dòng (ví dụ: ## Tiêu đề -> Tiêu đề)
-        .replace(/^#{1,6}\s*/gm, "")
-        // Đổi bullet dạng * hoặc • thành -
         .replace(/^[\*\•]\s+/gm, "- ")
 }
 
@@ -35,8 +31,12 @@ function ChatBox({ sessionId = "default", sessionTitle = "Cuộc trò chuyện",
     // State cho Rollback từ User Message
     const [rollbackState, setRollbackState] = useState(null)
 
+    // State cho PDF Viewer Modal & Interactive Citations
+    const [activePdfModal, setActivePdfModal] = useState(null)
+
     const messagesEndRef = useRef(null)
     const textareaRef = useRef(null)
+
 
     const scrollToBottom = () => {
         messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
@@ -66,11 +66,15 @@ function ChatBox({ sessionId = "default", sessionTitle = "Cuộc trò chuyện",
                     }
                     const reasoningItem = parsedThoughts.find((t) => t.step === "reasoning")
                     const thinkingText = reasoningItem ? (reasoningItem.content || reasoningItem.text || "") : ""
+                    const sourcesItem = parsedThoughts.find((t) => t.type === "sources" || t.step === "sources")
+                    const loadedSources = sourcesItem?.sources || []
+
                     return {
                         id: m.id,
                         role: m.role,
                         content: m.content,
                         thoughts: parsedThoughts,
+                        sources: loadedSources,
                         thinkingContent: thinkingText,
                         checkpoint_id: m.checkpoint_id,
                         isThinking: false,
@@ -95,7 +99,16 @@ function ChatBox({ sessionId = "default", sessionTitle = "Cuộc trò chuyện",
         scrollToBottom()
     }, [messages])
 
-
+    const handleOpenCitation = (citationInfo) => {
+        if (!citationInfo) return
+        setActivePdfModal({
+            isOpen: true,
+            documentName: citationInfo.documentName || "Tài liệu",
+            documentId: citationInfo.documentId || null,
+            page: citationInfo.page || 1,
+            snippet: citationInfo.snippet || "",
+        })
+    }
 
     const toggleThoughts = (id) => {
         setMessages((previous) =>
@@ -104,6 +117,7 @@ function ChatBox({ sessionId = "default", sessionTitle = "Cuộc trò chuyện",
             )
         )
     }
+
 
     // Bắt đầu quy trình Rollback & Chỉnh sửa câu hỏi
     const handleStartRollback = (userMsg) => {
@@ -168,6 +182,7 @@ function ChatBox({ sessionId = "default", sessionTitle = "Cuộc trò chuyện",
             role: "assistant",
             content: "",
             thoughts: [],
+            sources: [],
             thinkingContent: "",
             isThinking: true,
             showThoughts: true,
@@ -248,6 +263,17 @@ function ChatBox({ sessionId = "default", sessionTitle = "Cuộc trò chuyện",
                             )
                         )
                     }
+                } else if (event.type === "sources") {
+                    setMessages((previous) =>
+                        previous.map((msg) =>
+                            msg.id === assistantMessageId
+                                ? {
+                                      ...msg,
+                                      sources: event.sources || [],
+                                  }
+                                : msg
+                        )
+                    )
                 } else if (event.type === "tool_call") {
                     setMessages((previous) =>
                         previous.map((msg) => {
@@ -554,7 +580,70 @@ function ChatBox({ sessionId = "default", sessionTitle = "Cuộc trò chuyện",
                             {/* Nội dung câu trả lời cho Assistant */}
                             {message.role === "assistant" && (
                                 message.content ? (
-                                    <div className="assistant-text-body">{formatPlainText(message.content)}</div>
+                                    <>
+                                        <div className="assistant-text-body">
+                                            <MarkdownViewer
+                                                content={message.content}
+                                                onCitationClick={handleOpenCitation}
+                                            />
+                                        </div>
+
+                                        {/* Khối danh sách nguồn trích dẫn tương tác (Sources Grid) */}
+                                        {message.sources && message.sources.length > 0 && (
+                                            <div className="sources-container">
+                                                <div className="sources-header">
+                                                    <span className="sources-title">
+                                                        📚 Nguồn trích dẫn đối chiếu ({message.sources.length})
+                                                    </span>
+                                                    <span className="sources-hint">
+                                                        (Nhấp vào thẻ để mở trang PDF gốc)
+                                                    </span>
+                                                </div>
+                                                <div className="sources-cards-grid">
+                                                    {message.sources.map((src, sIdx) => {
+                                                        const confClass =
+                                                            src.level === "Cao"
+                                                                ? "conf-high"
+                                                                : src.level === "Trung bình"
+                                                                ? "conf-medium"
+                                                                : "conf-low"
+                                                        return (
+                                                            <div
+                                                                key={sIdx}
+                                                                className="source-card"
+                                                                onClick={() =>
+                                                                    handleOpenCitation({
+                                                                        documentName: src.document_name,
+                                                                        documentId: src.document_id,
+                                                                        page: src.page,
+                                                                        snippet: src.snippet,
+                                                                    })
+                                                                }
+                                                                title={`Nhấp để xem trang ${src.page} của ${src.document_name}`}
+                                                            >
+                                                                <div className="source-card-top">
+                                                                    <span className="source-card-doc">
+                                                                        📄 {src.document_name}
+                                                                    </span>
+                                                                    <span className="source-card-page">
+                                                                        Trang {src.page}
+                                                                    </span>
+                                                                </div>
+                                                                <div className="source-card-meta">
+                                                                    <span className={`source-conf-badge ${confClass}`}>
+                                                                        {src.level} ({(src.score * 100).toFixed(0)}%)
+                                                                    </span>
+                                                                    <span className="source-open-arrow">
+                                                                        Xem PDF ↗
+                                                                    </span>
+                                                                </div>
+                                                            </div>
+                                                        )
+                                                    })}
+                                                </div>
+                                            </div>
+                                        )}
+                                    </>
                                 ) : message.isThinking ? (
                                     <div className="thinking-typing-placeholder">
                                         <span>AI đang soạn thảo câu trả lời</span>
@@ -624,6 +713,16 @@ function ChatBox({ sessionId = "default", sessionTitle = "Cuộc trò chuyện",
                     AI responses may contain mistakes. Check important information against the source.
                 </p>
             </div>
+
+            {/* PDF Viewer Modal */}
+            <PDFModal
+                isOpen={Boolean(activePdfModal?.isOpen)}
+                onClose={() => setActivePdfModal(null)}
+                documentName={activePdfModal?.documentName}
+                documentId={activePdfModal?.documentId}
+                page={activePdfModal?.page}
+                snippet={activePdfModal?.snippet}
+            />
         </div>
     )
 }

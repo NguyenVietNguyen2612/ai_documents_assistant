@@ -22,6 +22,11 @@ QUY TẮC HOẠT ĐỘNG & CORRECTIVE RAG:
 3. Tuyệt đối không tự bịa ra thông tin. Nếu sau khi thử tìm kiếm lại vẫn không có thông tin, hãy thành thật nói rằng tài liệu không đề cập đến vấn đề này.
 4. Nếu câu hỏi là giao tiếp thông thường (ví dụ: "Chào bạn", "Bạn có thể làm gì?"), bạn có thể trả lời trực tiếp mà KHÔNG CẦN gọi công cụ.
 
+QUY TẮC TRÍCH DẪN NGUỒN (CITATIONS - BẮT BUỘC):
+1. Khi cung cấp câu trả lời có chứa dữ kiện hoặc số liệu từ tài liệu, bạn BẮT BUỘC phải đặt thẻ trích dẫn nguồn ngay cạnh thông tin đó theo đúng định dạng chuẩn:
+   [Tài liệu: <tên_tệp> - Trang <số_trang>] (Ví dụ: [Tài liệu: CS338.pdf - Trang 2]).
+2. Đối chiếu cẩn thận số trang ghi trong [Source ...] của ngữ cảnh để ghi đúng số trang, tuyệt đối không bịa số trang.
+
 QUY TẮC SUY LUẬN (CHAIN-OF-THOUGHT - TƯƠNG TỰ DEEPSEEK):
 Khi bạn chuẩn bị đưa ra câu trả lời cho người dùng (cả khi trả lời trực tiếp lẫn sau khi tra cứu tài liệu), bạn BẮT BUỘC phải mở đầu câu trả lời bằng cặp thẻ <think>...</think>.
 Bên trong khối <think>, hãy trình bày chi tiết và cụ thể toàn bộ quá trình bạn suy nghĩ và phân tích:
@@ -31,17 +36,13 @@ Bên trong khối <think>, hãy trình bày chi tiết và cụ thể toàn bộ
 - Lên kế hoạch cấu trúc câu trả lời rõ ràng, mạch lạc, dễ hiểu.
 Sau khi đóng thẻ </think>, bạn mới viết nội dung câu trả lời chính thức gửi tới người dùng.
 
-QUY TẮC ĐỊNH DẠNG VĂN BẢN (CỰC KỲ QUAN TRỌNG - BẮT BUỘC TUÂN THỦ 100%):
-1. TRẢ VỀ VĂN BẢN THƯỜNG (PLAIN TEXT):
-   - Tuyệt đối CẤM sử dụng cặp dấu sao ** để in đậm từ ngữ (ví dụ: KHÔNG VIẾT **lọc mềm**, PHẢI VIẾT lọc mềm).
-   - Tuyệt đối CẤM sử dụng dấu thăng # làm tiêu đề (ví dụ: KHÔNG VIẾT ## Tiêu đề).
-   - Tuyệt đối CẤM dùng bảng Markdown hoặc gạch đầu dòng dạng dấu sao (*).
-   - LƯU Ý KHI ĐỌC TÀI LIỆU: Dù nội dung tài liệu trích xuất có chứa dấu ** hay # thì khi viết câu trả lời bạn BẮT BUỘC phải bỏ hết các ký tự ** và # này đi.
-2. CÁCH PHÂN CẤP VÀ LIỆT KÊ: Nếu cần phân cấp mục, tiêu đề phân đoạn hoặc liệt kê, CHỈ ĐƯỢC PHÉP dùng các ký hiệu sau ở đầu câu/đầu dòng:
-   - Dấu gạch ngang (-)
-   - Dấu cộng (+)
-   - Dấu chấm (.)
-   - Hoặc số thứ tự (ví dụ: 1., 2., 3. hoặc 1.1, 1.2)
+QUY TẮC ĐỊNH DẠNG VĂN BẢN (MARKDOWN CHUẨN):
+- Sử dụng Markdown chuẩn để câu trả lời mạch lạc và chuyên nghiệp:
+  + Dùng in đậm (**từ khóa**) để làm nổi bật các khái niệm hoặc kết luận quan trọng.
+  + Dùng tiêu đề (##, ###) để phân chia các phần nếu câu trả lời dài.
+  + Dùng danh sách gạch đầu dòng (-) hoặc số thứ tự (1., 2.) khi phân loại hoặc liệt kê.
+  + Dùng bảng Markdown (| Cột 1 | Cột 2 |) khi so sánh số liệu hoặc trình bày kết quả thực nghiệm.
+  + Dùng công thức toán học ($...$ hoặc $$...$$) khi trình bày biểu thức toán/tần số.
 """
 
     def __init__(self, graph=None):
@@ -86,7 +87,6 @@ QUY TẮC ĐỊNH DẠNG VĂN BẢN (CỰC KỲ QUAN TRỌNG - BẮT BUỘC TUÂ
 
         import re
         clean_answer = re.sub(r'<think>.*?</think>', '', raw_answer, flags=re.DOTALL).strip()
-        clean_answer = clean_answer.replace("**", "").replace("__", "")
 
         # Lấy checkpoint id sau khi hoàn thành
         new_state = await graph.aget_state(config)
@@ -98,6 +98,7 @@ QUY TẮC ĐỊNH DẠNG VĂN BẢN (CỰC KỲ QUAN TRỌNG - BẮT BUỘC TUÂ
             "checkpoint_id": new_checkpoint_id,
             "context": ""
         }
+
 
     async def ask_stream(
         self,
@@ -273,6 +274,36 @@ QUY TẮC ĐỊNH DẠNG VĂN BẢN (CỰC KỲ QUAN TRỌNG - BẮT BUỘC TUÂ
                             result_msg = f"Đã tìm thấy {doc_count} đoạn ngữ cảnh phù hợp nhất sau khi Rerank."
                             if has_low_conf:
                                 result_msg += " (Điểm tương quan thấp -> kích hoạt đánh giá Corrective RAG)."
+
+                            # Trích xuất cấu trúc sources để hỗ trợ Interactive Citations trên UI
+                            import re
+                            extracted_sources = []
+                            pattern = r"\[Source (\d+)\]\s*\[Tài liệu:\s*([^\]\-]+?)(?:\s*-\s*Trang\s*(\d+))?\](?:\s*\(([^)]+)\))?"
+                            docs_in_db = db_service.get_all_documents()
+                            doc_map = {d["name"].lower().strip(): d["id"] for d in docs_in_db}
+
+                            for match in re.finditer(pattern, out_content):
+                                s_id, d_name, p_num, s_meta = match.groups()
+                                score_match = re.search(r"([\d\.]+)/1\.00", s_meta or "")
+                                lvl_match = re.search(r"\((Cao|Trung bình|Thấp)\)", s_meta or "")
+                                clean_doc = d_name.strip() if d_name else ""
+                                extracted_sources.append({
+                                    "source_id": int(s_id),
+                                    "document_name": clean_doc,
+                                    "document_id": doc_map.get(clean_doc.lower(), ""),
+                                    "page": int(p_num) if p_num else 1,
+                                    "score": float(score_match.group(1)) if score_match else 0.5,
+                                    "level": lvl_match.group(1) if lvl_match else "Trung bình",
+                                })
+
+                            if extracted_sources:
+                                sources_event = {
+                                    "type": "sources",
+                                    "step": "sources",
+                                    "sources": extracted_sources,
+                                }
+                                thoughts_history.append(sources_event)
+                                yield f"data: {json.dumps(sources_event, ensure_ascii=False)}\n\n"
                         else:
                             result_msg = "Không tìm thấy đoạn văn bản khớp trực tiếp -> Gợi ý Agent tự động viết lại truy vấn (Query Rewriting)."
                     elif name == "list_uploaded_documents":
@@ -377,10 +408,8 @@ QUY TẮC ĐỊNH DẠNG VĂN BẢN (CỰC KỲ QUAN TRỌNG - BẮT BUỘC TUÂ
                                 thoughts_history.append(thought)
                                 yield f"data: {json.dumps(thought, ensure_ascii=False)}\n\n"
 
-                            cleaned = stream_buffer.replace("**", "").replace("__", "")
-                            if cleaned:
-                                full_answer_parts.append(cleaned)
-                                yield f"data: {json.dumps({'type': 'token', 'content': cleaned}, ensure_ascii=False)}\n\n"
+                            full_answer_parts.append(stream_buffer)
+                            yield f"data: {json.dumps({'type': 'token', 'content': stream_buffer}, ensure_ascii=False)}\n\n"
                             stream_buffer = ""
 
             # Xử lý phần còn tồn đọng trong buffer nếu kết thúc stream
@@ -396,15 +425,12 @@ QUY TẮC ĐỊNH DẠNG VĂN BẢN (CỰC KỲ QUAN TRỌNG - BẮT BUỘC TUÂ
                 thoughts_history.append(reason_item)
                 yield f"data: {json.dumps(reason_item, ensure_ascii=False)}\n\n"
             elif think_ended and stream_buffer:
-                cleaned = stream_buffer.replace("**", "").replace("__", "")
-                if cleaned:
-                    full_answer_parts.append(cleaned)
-                    yield f"data: {json.dumps({'type': 'token', 'content': cleaned}, ensure_ascii=False)}\n\n"
+                full_answer_parts.append(stream_buffer)
+                yield f"data: {json.dumps({'type': 'token', 'content': stream_buffer}, ensure_ascii=False)}\n\n"
             elif not think_ended and stream_buffer:
-                cleaned = stream_buffer.replace("**", "").replace("__", "")
-                if cleaned:
-                    full_answer_parts.append(cleaned)
-                    yield f"data: {json.dumps({'type': 'token', 'content': cleaned}, ensure_ascii=False)}\n\n"
+                full_answer_parts.append(stream_buffer)
+                yield f"data: {json.dumps({'type': 'token', 'content': stream_buffer}, ensure_ascii=False)}\n\n"
+
 
             # 2. Hoàn tất toàn bộ luồng
             complete_thought = {

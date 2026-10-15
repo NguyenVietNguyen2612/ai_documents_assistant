@@ -47,7 +47,7 @@ class ContextBuilder:
                 if max_norm_score is None or norm_score > max_norm_score:
                     max_norm_score = norm_score
 
-            context = f"""[Source {i}] [Tài liệu: {doc_name}] (Trang {page}{score_str})
+            context = f"""[Source {i}] [Tài liệu: {doc_name} - Trang {page}] ({score_str.lstrip(' | ') if score_str else ''})
 Document: {doc_name}
 Page: {page}
 
@@ -67,3 +67,36 @@ Page: {page}
             )
 
         return joined_context
+
+    @classmethod
+    def extract_sources_metadata(cls, results) -> list[dict]:
+        """Trích xuất metadata có cấu trúc của các nguồn trích dẫn để gửi về Frontend."""
+        if not results or not results[0]:
+            return []
+        sources = []
+        for i, result in enumerate(results[0], start=1):
+            entity = result.get("entity", {})
+            doc_name = entity.get("document_name", "Unknown")
+            doc_id = entity.get("document_id", "")
+            page = entity.get("page", 1)
+            text = entity.get("text", "")
+            raw_score = result.get(
+                "normalized_score",
+                result.get("rerank_score", result.get("score", 0.0)),
+            )
+            norm_score = RerankerService.normalize_score(float(raw_score)) if raw_score is not None else 0.50
+            level = (
+                "Cao"
+                if norm_score >= cls.HIGH_CONFIDENCE_THRESHOLD
+                else ("Trung bình" if norm_score >= cls.LOW_CONFIDENCE_THRESHOLD else "Thấp")
+            )
+            sources.append({
+                "source_id": i,
+                "document_name": doc_name,
+                "document_id": doc_id,
+                "page": int(page),
+                "score": norm_score,
+                "level": level,
+                "snippet": (text[:280] + "...") if len(text) > 280 else text,
+            })
+        return sources

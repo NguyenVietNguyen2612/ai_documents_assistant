@@ -74,7 +74,11 @@ class LLMService:
         )
 
     @rate_limit_retry()
-    def extract_document_content(self, file_bytes: bytes, mime_type: str) -> str:
+    def extract_document_pages(self, file_bytes: bytes, mime_type: str) -> list[dict]:
+        """
+        Trích xuất văn bản tài liệu giữ nguyên số trang chính xác:
+        Trả về danh sách các trang: [{"page": 1, "text": "..."}, {"page": 2, "text": "..."}]
+        """
         prompt = """
 Bạn là chuyên gia trích xuất dữ liệu tài liệu.
 Nhiệm vụ: Trích xuất toàn bộ văn bản từ hình ảnh/tài liệu được cung cấp.
@@ -83,52 +87,59 @@ Yêu cầu bắt buộc:
 2. NẾU CÓ BẢNG BIỂU (TABLE): BẮT BUỘC trình bày dưới dạng chuẩn Markdown (ví dụ: | Cột 1 | Cột 2 |). KHÔNG ĐƯỢC biến bảng thành các đoạn text rời rạc. Phải giữ nguyên hàng và cột.
 3. Chỉ trả về nội dung trích xuất, không giải thích gì thêm.
 """
-        # Nếu là PDF, ép buộc Gemini dùng Vision bằng cách chuyển PDF thành ảnh (từng trang)
-        # Điều này giúp Gemini nhìn thấy cái vạch kẻ của Bảng thay vì chỉ đọc luồng text bị ẩn.
+        pages_data = []
+
         if "pdf" in mime_type.lower():
             import pymupdf
             doc = pymupdf.open(stream=file_bytes, filetype="pdf")
-            full_text = []
-            
+
             for page_num in range(len(doc)):
                 page = doc.load_page(page_num)
                 local_text = page.get_text()
-                
-                # Logic thông minh: Chỉ dùng OCR khi thật sự cần
-                # 1. Trang chứa bảng biểu
-                # 2. Trang không có chữ (ảnh scan)
+                real_page = page_num + 1
+
+                # Logic thông minh: Chỉ dùng OCR khi thật sự cần (chứa bảng hoặc ảnh scan)
                 tables = page.find_tables().tables if hasattr(page, 'find_tables') else []
                 has_tables = len(tables) > 0
                 is_scanned = len(local_text.strip()) == 0 and len(page.get_images()) > 0
-                
+
+                page_text = ""
                 if has_tables or is_scanned:
-                    print(f"[LLMService] Trang {page_num + 1}/{len(doc)} chứa Bảng/Ảnh scan. Đang gọi Gemini Vision...")
+                    print(f"[LLMService] Trang {real_page}/{len(doc)} chứa Bảng/Ảnh scan. Đang gọi Gemini Vision...")
                     pix = page.get_pixmap(dpi=150)
                     img_bytes = pix.tobytes("png")
-                    
+
                     try:
                         part = types.Part.from_bytes(data=img_bytes, mime_type="image/png")
                         response = self.client.models.generate_content(
-                            model=self.model_name, 
+                            model=self.model_name,
                             contents=[prompt, part],
                         )
                         if response.text:
-                            full_text.append(response.text)
+                            page_text = response.text.strip()
                     except Exception as e:
-                        print(f"[LLMService] Lỗi khi trích xuất trang {page_num + 1}: {e}. Fallback dùng text cục bộ.")
-                        full_text.append(local_text)
+                        print(f"[LLMService] Lỗi khi trích xuất trang {real_page}: {e}. Fallback dùng text cục bộ.")
+                        page_text = local_text.strip()
                 else:
-                    print(f"[LLMService] Trang {page_num + 1}/{len(doc)} là text thường. Đọc siêu tốc cục bộ...")
-                    if local_text:
-                        full_text.append(local_text)
-                    
-            return "\n\n".join(full_text)
-            
+                    print(f"[LLMService] Trang {real_page}/{len(doc)} là text thường. Đọc siêu tốc cục bộ...")
+                    page_text = local_text.strip()
+
+                if page_text:
+                    pages_data.append({"page": real_page, "text": page_text})
+
+            return pages_data
+
         else:
-            # File ảnh bình thường
+            # File ảnh đơn lẻ
             part = types.Part.from_bytes(data=file_bytes, mime_type=mime_type)
             response = self.client.models.generate_content(
                 model=self.model_name,
                 contents=[prompt, part],
             )
-            return response.text
+            text = (response.text or "").strip()
+            return [{"page": 1, "text": text}] if text else []
+
+    @rate_limit_retry()
+    def extract_document_content(self, file_bytes: bytes, mime_type: str) -> str:
+        pages = self.extract_document_pages(file_bytes=file_bytes, mime_type=mime_type)
+        return "\n\n".join(p["text"] for p in pages if p.get("text"))
