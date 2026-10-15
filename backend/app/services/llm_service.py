@@ -25,7 +25,6 @@ def rate_limit_retry(max_retries=5, initial_delay=10):
     return decorator
 
 from google.genai import types
-import fitz
 
 class LLMService:
     def __init__(self, api_key: str = None):
