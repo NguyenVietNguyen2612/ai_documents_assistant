@@ -1,6 +1,15 @@
 import os
 import time
+import io
+import csv
+from pathlib import Path
 from functools import wraps
+
+if os.path.exists("/etc/ssl/certs/ca-certificates.crt"):
+    os.environ.setdefault("REQUESTS_CA_BUNDLE", "/etc/ssl/certs/ca-certificates.crt")
+    os.environ.setdefault("SSL_CERT_FILE", "/etc/ssl/certs/ca-certificates.crt")
+    os.environ.setdefault("CURL_CA_BUNDLE", "/etc/ssl/certs/ca-certificates.crt")
+
 from google import genai
 from dotenv import load_dotenv
 
@@ -29,7 +38,11 @@ from google.genai import types
 class LLMService:
     def __init__(self, api_key: str = None):
         # Tải các biến môi trường từ file .env
-        load_dotenv()
+        env_file = Path(__file__).resolve().parents[2] / ".env"
+        if env_file.exists():
+            load_dotenv(dotenv_path=env_file)
+        else:
+            load_dotenv()
         
         # Lấy API key từ tham số truyền vào hoặc từ biến môi trường
         self.api_key = api_key or os.getenv("GEMINI_API_KEY")
@@ -39,8 +52,8 @@ class LLMService:
         # Khởi tạo client với SDK mới
         self.client = genai.Client(api_key=self.api_key)
         
-        # Đặt tên model (bạn có thể thay đổi thành gemini-2.5-flash hoặc version mới hơn)
-        self.model_name = "gemini-3.1-flash-lite"
+        # Đặt tên model tối ưu và mới nhất
+        self.model_name = os.getenv("GEMINI_MODEL", "gemini-3.5-flash-lite")
 
     @rate_limit_retry()
     def generate(self, prompt: str) -> str:
@@ -88,7 +101,50 @@ Yêu cầu bắt buộc:
 """
         pages_data = []
 
-        if "pdf" in mime_type.lower():
+        mime_lower = (mime_type or "").lower()
+
+        if "csv" in mime_lower:
+            try:
+                text_content = file_bytes.decode("utf-8")
+            except UnicodeDecodeError:
+                text_content = file_bytes.decode("latin-1", errors="replace")
+
+            # Parse CSV and convert to readable Markdown table chunks
+            reader = list(csv.reader(io.StringIO(text_content)))
+            if not reader:
+                return [{"page": 1, "text": ""}]
+
+            headers = reader[0]
+            header_line = "| " + " | ".join(headers) + " |"
+            separator_line = "| " + " | ".join(["---"] * len(headers)) + " |"
+
+            data_rows = reader[1:]
+            if not data_rows:
+                table_md = f"{header_line}\n{separator_line}\n"
+                return [{"page": 1, "text": table_md}]
+
+            # Group rows into page-sized blocks (e.g. 35 rows per page)
+            rows_per_page = 35
+            pages_data = []
+            for i in range(0, len(data_rows), rows_per_page):
+                page_idx = (i // rows_per_page) + 1
+                chunk_rows = data_rows[i:i + rows_per_page]
+                lines = [f"# Bảng dữ liệu CSV (Phần {page_idx})\n", header_line, separator_line]
+                for r in chunk_rows:
+                    padded_r = r + [""] * (len(headers) - len(r))
+                    clean_cols = [c.replace("|", "\\|").replace("\n", " ").strip() for c in padded_r[:len(headers)]]
+                    lines.append("| " + " | ".join(clean_cols) + " |")
+                pages_data.append({"page": page_idx, "text": "\n".join(lines)})
+            return pages_data
+
+        elif "text" in mime_lower or "markdown" in mime_lower or "plain" in mime_lower:
+            try:
+                text_content = file_bytes.decode("utf-8")
+            except UnicodeDecodeError:
+                text_content = file_bytes.decode("latin-1", errors="replace")
+            return [{"page": 1, "text": text_content.strip()}]
+
+        elif "pdf" in mime_lower:
             import pymupdf
             doc = pymupdf.open(stream=file_bytes, filetype="pdf")
 

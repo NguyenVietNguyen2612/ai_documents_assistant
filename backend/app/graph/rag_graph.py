@@ -1,4 +1,9 @@
 import os
+if os.path.exists("/etc/ssl/certs/ca-certificates.crt"):
+    os.environ.setdefault("REQUESTS_CA_BUNDLE", "/etc/ssl/certs/ca-certificates.crt")
+    os.environ.setdefault("SSL_CERT_FILE", "/etc/ssl/certs/ca-certificates.crt")
+    os.environ.setdefault("CURL_CA_BUNDLE", "/etc/ssl/certs/ca-certificates.crt")
+
 import aiosqlite
 from langgraph.graph import StateGraph, START, END
 from langgraph.prebuilt import ToolNode, tools_condition
@@ -132,7 +137,15 @@ def _get_llm_and_tools():
         context_builder = ContextBuilder()
         _tools = make_agent_tools(retriever, context_builder)
 
-        model_name = os.environ.get("GEMINI_MODEL", "gemini-3.1-flash-lite")
+        from pathlib import Path
+        from dotenv import load_dotenv
+        env_file = Path(__file__).resolve().parents[2] / ".env"
+        if env_file.exists():
+            load_dotenv(dotenv_path=env_file)
+        else:
+            load_dotenv()
+
+        model_name = os.environ.get("GEMINI_MODEL", "gemini-3.5-flash-lite")
         _llm = ChatGoogleGenerativeAI(
             model=model_name,
             google_api_key=os.environ.get("GEMINI_API_KEY", ""),

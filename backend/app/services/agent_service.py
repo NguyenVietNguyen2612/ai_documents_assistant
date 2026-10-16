@@ -466,6 +466,8 @@ QUY TẮC ĐỊNH DẠNG VĂN BẢN (MARKDOWN CHUẨN):
             yield f"data: {json.dumps({'type': 'done'}, ensure_ascii=False)}\n\n"
 
         except Exception as e:
+            import traceback
+            traceback.print_exc()
             error_msg = f"Đã xảy ra lỗi khi xử lý: {str(e)}"
             yield f"data: {json.dumps({'type': 'error', 'content': error_msg}, ensure_ascii=False)}\n\n"
 

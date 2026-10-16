@@ -28,14 +28,25 @@ def get_documents():
 
 @router.get("/documents/{document_id}/file")
 def get_document_file(document_id: str):
-    """Phục vụ file PDF gốc để hiển thị xem trước (preview) trên giao diện theo số trang."""
-    pdf_path = DOCS_DIR / f"{document_id}.pdf"
-    if not pdf_path.exists():
-        raise HTTPException(status_code=404, detail="File PDF không tồn tại trên hệ thống")
+    """Phục vụ file tài liệu gốc để hiển thị xem trước (preview) trên giao diện theo số trang."""
+    matching_files = list(DOCS_DIR.glob(f"{document_id}.*"))
+    if not matching_files:
+        raise HTTPException(status_code=404, detail="File tài liệu không tồn tại trên hệ thống")
+    
+    target_file = matching_files[0]
+    ext = target_file.suffix.lower()
+    media_map = {
+        ".pdf": "application/pdf",
+        ".csv": "text/csv; charset=utf-8",
+        ".txt": "text/plain; charset=utf-8",
+        ".md": "text/markdown; charset=utf-8",
+    }
+    media_type = media_map.get(ext, "application/octet-stream")
+
     return FileResponse(
-        path=pdf_path,
-        media_type="application/pdf",
-        filename=f"{document_id}.pdf",
+        path=target_file,
+        media_type=media_type,
+        filename=target_file.name,
     )
 
 
@@ -43,18 +54,20 @@ def get_document_file(document_id: str):
 async def upload_document(
     file: UploadFile = File(...)
 ):
-    if file.content_type != "application/pdf":
+    ext = Path(file.filename or "").suffix.lower()
+    allowed_extensions = {".pdf", ".csv", ".txt", ".md"}
+    if ext not in allowed_extensions:
         return {
-            "error": "Only PDF files are allowed"
+            "error": f"Định dạng tệp '{ext}' không được hỗ trợ. Vui lòng tải lên file: {', '.join(allowed_extensions)}"
         }
 
     doc_id = str(uuid.uuid4())
     file_bytes = await file.read()
     await file.seek(0)
 
-    # 1. Lưu file PDF vật lý vào app_data/documents để hỗ trợ PDF Viewer nhảy đến đúng số trang
-    pdf_path = DOCS_DIR / f"{doc_id}.pdf"
-    with open(pdf_path, "wb") as f:
+    # 1. Lưu file vật lý vào app_data/documents để hỗ trợ Viewer mở lại
+    saved_file_path = DOCS_DIR / f"{doc_id}{ext}"
+    with open(saved_file_path, "wb") as f:
         f.write(file_bytes)
 
     file_size = len(file_bytes)
@@ -114,12 +127,11 @@ def delete_document(document_id: str):
     # Remove from BM25 index
     bm25_service.remove_documents_by_id(document_id)
 
-    # Xóa file PDF vật lý nếu có
-    pdf_path = DOCS_DIR / f"{document_id}.pdf"
-    if pdf_path.exists():
+    # Xóa file vật lý tương ứng nếu có
+    for f in DOCS_DIR.glob(f"{document_id}.*"):
         try:
-            pdf_path.unlink()
+            f.unlink()
         except Exception as e:
-            print(f"Failed to delete PDF file: {e}")
+            print(f"Failed to delete document file {f}: {e}")
 
     return {"message": "Document and associated vector data deleted successfully"}

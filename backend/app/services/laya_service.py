@@ -10,7 +10,7 @@ class LayaDecisionService:
     evaluating state and typed questions in a single forward pass without generating free-form text.
     """
 
-    DEFAULT_MIN_CONFIDENCE = 0.75
+    DEFAULT_MIN_CONFIDENCE = 0.30
 
     def __init__(
         self,
@@ -50,8 +50,16 @@ class LayaDecisionService:
     def decide(self, question: str) -> AgentDecision:
         """
         Determines the next action ('retrieve' or 'answer') for the given question.
-        Uses Laya non-autoregressive decision model with typed choices and confidence threshold.
+        Uses fast-path greeting heuristics and Laya non-autoregressive decision model.
         """
+        # 1. Fast System-1 heuristic: Ngay lập tức nhận diện lời chào hỏi/xã giao thuần túy
+        if self._is_pure_conversational(question):
+            return AgentDecision(
+                action="answer",
+                reason="System-1 Fast Heuristic: classified as conversational greeting/chitchat (confidence: 0.99)",
+            )
+
+        # 2. Sử dụng Laya Decision Model (Non-autoregressive System 1)
         if self.agent is not None:
             try:
                 state = {
@@ -170,10 +178,11 @@ Question:
 
         conversational_patterns = [
             r"^(xin )?chào(\s+bạn|\s+ad|\s+ai|\s+nhé|\s+nha|\s+ạ)*$",
-            r"^(hi|hello|hey|alo)(\s+there|\s+bạn|\s+ai)*$",
+            r"^(hi|hello|hey|alo)(\s+there|\s+bạn|\s+ai|\s+assistant|\s+bot)*$",
+            r"^(good morning|good afternoon|good evening)$",
             r"^(cảm ơn|cám ơn|thank|thanks|thank you)(\s+bạn|\s+nhiều|\s+nhé|\s+ạ)*$",
             r"^(tạm biệt|bye|goodbye)(\s+bạn|\s+nhé)*$",
-            r"^(bạn là ai|bạn tên gì|bạn làm được gì|bạn có thể làm gì|who are you|what can you do)(\s+vậy|\s+thế|\s+ạ)*$",
+            r"^(bạn là ai|bạn tên gì|bạn làm được gì|bạn có thể làm gì|who are you|what can you do|how are you)(\s+vậy|\s+thế|\s+ạ)*$",
         ]
         return any(re.match(pattern, cleaned) for pattern in conversational_patterns)
 

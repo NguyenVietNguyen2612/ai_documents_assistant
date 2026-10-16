@@ -50,7 +50,7 @@ function DocumentUpload({ onUploadSuccess }) {
             <label className="upload-box">
                 <input
                     type="file"
-                    accept=".pdf"
+                    accept=".pdf,.csv,.txt,.md"
                     onChange={handleFileChange}
                     hidden
                 />
@@ -68,13 +68,15 @@ function DocumentUpload({ onUploadSuccess }) {
                 </div>
 
                 <div className="upload-format">
-                    PDF files only · Max 20 MB
+                    PDF, CSV, TXT, MD · Max 20 MB
                 </div>
             </label>
 
             {file && (
                 <div className="selected-file">
-                    <div className="file-icon">PDF</div>
+                    <div className="file-icon">
+                        {file.name.split('.').pop()?.toUpperCase() || "FILE"}
+                    </div>
 
                     <div className="file-info">
                         <span className="file-name">

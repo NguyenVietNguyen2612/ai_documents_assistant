@@ -20,15 +20,24 @@ class DocumentService:
         file_bytes = file.file.read()
         file.file.seek(0)
 
+        filename = (file.filename or "").lower()
+        mime_type = (file.content_type or "").lower()
+        if not mime_type or mime_type in ("application/octet-stream", "text/plain"):
+            if filename.endswith(".csv"):
+                mime_type = "text/csv"
+            elif filename.endswith(".md"):
+                mime_type = "text/markdown"
+            elif filename.endswith(".pdf"):
+                mime_type = "application/pdf"
+
         try:
-            print(f"[DocumentService] Bắt đầu OCR và trích xuất theo trang bằng Gemini Vision cho file {file.filename}...")
-            mime_type = file.content_type or "application/pdf"
+            print(f"[DocumentService] Trích xuất nội dung cho file {file.filename} (mime_type: {mime_type})...")
             pages = llm.extract_document_pages(file_bytes=file_bytes, mime_type=mime_type)
             if pages:
-                print(f"[DocumentService] Trích xuất thành công {len(pages)} trang bằng Gemini/PyMuPDF!")
+                print(f"[DocumentService] Trích xuất thành công {len(pages)} trang/phần từ {file.filename}!")
                 return pages
         except Exception as e:
-            print(f"[DocumentService] Lỗi khi dùng Gemini Vision: {e}. Fallback sang pypdf...")
+            print(f"[DocumentService] Lỗi khi trích xuất: {e}. Fallback sang pypdf...")
 
         file.file.seek(0)
         pages_fallback = []

@@ -17,9 +17,9 @@ function PDFModal({ isOpen, onClose, documentName, documentId: initialDocId, pag
                 .then((res) => res.json())
                 .then((docs) => {
                     if (Array.isArray(docs)) {
-                        const cleanTarget = documentName.toLowerCase().replace(/\.pdf$/i, "").trim()
+                        const cleanTarget = documentName.toLowerCase().replace(/\.(pdf|csv|txt|md)$/i, "").trim()
                         const found = docs.find((d) => {
-                            const dName = (d.name || "").toLowerCase().replace(/\.pdf$/i, "").trim()
+                            const dName = (d.name || "").toLowerCase().replace(/\.(pdf|csv|txt|md)$/i, "").trim()
                             return dName === cleanTarget || dName.includes(cleanTarget) || cleanTarget.includes(dName)
                         })
                         if (found) {
