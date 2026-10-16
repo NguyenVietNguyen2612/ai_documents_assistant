@@ -28,8 +28,9 @@ QUY TẮC TRÍCH DẪN NGUỒN (CITATIONS - BẮT BUỘC):
 2. Đối chiếu cẩn thận số trang ghi trong [Source ...] của ngữ cảnh để ghi đúng số trang, tuyệt đối không bịa số trang.
 
 QUY TẮC SUY LUẬN (CHAIN-OF-THOUGHT - TƯƠNG TỰ DEEPSEEK):
-Khi bạn chuẩn bị đưa ra câu trả lời cho người dùng (cả khi trả lời trực tiếp lẫn sau khi tra cứu tài liệu), bạn BẮT BUỘC phải mở đầu câu trả lời bằng cặp thẻ <think>...</think>.
-Bên trong khối <think>, hãy trình bày chi tiết và cụ thể toàn bộ quá trình bạn suy nghĩ và phân tích:
+- LƯU Ý KHI GỌI CÔNG CỤ (TOOL CALL): Khi bạn cần gọi công cụ (`list_uploaded_documents`, `retrieve_documents`, `get_document_overview`, `calculate_metrics`), HÃY KÍCH HOẠT CÔNG CỤ TRỰC TIẾP NGAY LẬP TỨC. TUYỆT ĐỐI KHÔNG sinh thẻ <think> hay viết văn bản trước khi gọi công cụ.
+- KHI VIẾT CÂU TRẢ LỜI CUỐI CÙNG CHO NGƯỜI DÙNG (sau khi đã có kết quả từ công cụ hoặc khi trả lời trực tiếp không cần công cụ): bạn BẮT BUỘC mở đầu bằng cặp thẻ <think>...</think> (chú ý đóng đúng bằng thẻ </think>).
+Bên trong khối <think>, hãy trình bày chi tiết quá trình suy nghĩ và phân tích:
 - Phân tích câu hỏi của người dùng và các điểm cốt lõi cần giải đáp.
 - Đánh giá thông tin ngữ cảnh tìm được từ tài liệu (thông tin nào có sẵn, số liệu nào được tìm thấy, có điểm nào tài liệu chưa đề cập hay không).
 - Lập luận logic từng bước để đi đến kết luận và giải pháp.
@@ -86,7 +87,8 @@ QUY TẮC ĐỊNH DẠNG VĂN BẢN (MARKDOWN CHUẨN):
             raw_answer = "".join(text_parts) if text_parts else str(raw_answer)
 
         import re
-        clean_answer = re.sub(r'<think>.*?</think>', '', raw_answer, flags=re.DOTALL).strip()
+        clean_answer = re.sub(r'<(?:think|thought)>.*?</(?:think|thought|quist)>', '', raw_answer, flags=re.DOTALL)
+        clean_answer = re.sub(r'<accessibility>.*?</accessibility>', '', clean_answer, flags=re.DOTALL).strip()
 
         # Lấy checkpoint id sau khi hoàn thành
         new_state = await graph.aget_state(config)
@@ -108,6 +110,7 @@ QUY TẮC ĐỊNH DẠNG VĂN BẢN (MARKDOWN CHUẨN):
         checkpoint_id: Optional[str] = None,
         rollback_from_message_id: Optional[str] = None
     ) -> AsyncGenerator[str, None]:
+        import re
         graph = await self._get_graph()
 
         # Đảm bảo session tồn tại trong DB
@@ -188,8 +191,19 @@ QUY TẮC ĐỊNH DẠNG VĂN BẢN (MARKDOWN CHUẨN):
                     thoughts_history.append(router_thought)
                     yield f"data: {json.dumps(router_thought, ensure_ascii=False)}\n\n"
 
-                # Khi Agent bắt đầu vòng lặp tư duy
+                # Khi Agent bắt đầu vòng lặp tư duy mới
                 elif event_type == "on_chain_start" and name == "agent":
+                    # Xả buffer suy luận của vòng lặp trước (nếu có) và đặt lại trạng thái thẻ <think>
+                    if stream_buffer.strip():
+                        leftover = re.sub(r"</?(?:think|thought|quist|accessibility)>", "", stream_buffer)
+                        leftover = re.sub(r"call:(?:default_api:)?[a-zA-Z0-9_]+\s*\{.*?\}", "", leftover, flags=re.DOTALL).strip()
+                        if leftover:
+                            full_thinking_parts.append(leftover + "\n")
+                            yield f"data: {json.dumps({'type': 'thought_token', 'content': leftover}, ensure_ascii=False)}\n\n"
+                    stream_buffer = ""
+                    in_think_tag = False
+                    think_ended = False
+
                     iteration += 1
                     if iteration == 1:
                         thought = {
@@ -276,7 +290,6 @@ QUY TẮC ĐỊNH DẠNG VĂN BẢN (MARKDOWN CHUẨN):
                                 result_msg += " (Điểm tương quan thấp -> kích hoạt đánh giá Corrective RAG)."
 
                             # Trích xuất cấu trúc sources để hỗ trợ Interactive Citations trên UI
-                            import re
                             extracted_sources = []
                             pattern = r"\[Source (\d+)\]\s*\[Tài liệu:\s*([^\]\-]+?)(?:\s*-\s*Trang\s*(\d+))?\](?:\s*\(([^)]+)\))?"
                             docs_in_db = db_service.get_all_documents()
@@ -359,14 +372,23 @@ QUY TẮC ĐỊNH DẠNG VĂN BẢN (MARKDOWN CHUẨN):
                             continue
 
                         stream_buffer += chunk_text
+                        # Chuẩn hóa các biến thể thẻ đóng/mở của Gemini 3.5
+                        stream_buffer = re.sub(r"<accessibility>\s*</accessibility>", "", stream_buffer)
+                        stream_buffer = stream_buffer.replace("<thought>", "<think>")
+                        stream_buffer = stream_buffer.replace("</thought>", "</think>").replace("</quist>", "</think>")
 
-                        # 1. Chưa vào thẻ <think> và chưa kết thúc think
-                        if not in_think_tag and not think_ended:
+                        # 1. Phát hiện thẻ mở <think> (kể cả ở vòng lặp thứ 2-3)
+                        if not in_think_tag:
                             if "<think>" in stream_buffer:
-                                _, after_open = stream_buffer.split("<think>", 1)
+                                before_open, after_open = stream_buffer.split("<think>", 1)
+                                before_clean = re.sub(r"</?accessibility>", "", before_open)
+                                if before_clean.strip():
+                                    full_answer_parts.append(before_clean)
+                                    yield f"data: {json.dumps({'type': 'token', 'content': before_clean}, ensure_ascii=False)}\n\n"
                                 in_think_tag = True
+                                think_ended = False
                                 stream_buffer = after_open
-                            elif len(stream_buffer) > 15:
+                            elif not think_ended and len(stream_buffer) > 25:
                                 think_ended = True
 
                         # 2. Đang trong thẻ <think> (Suy nghĩ chi tiết của mô hình)
@@ -380,6 +402,7 @@ QUY TẮC ĐỊNH DẠNG VĂN BẢN (MARKDOWN CHUẨN):
                                     yield f"data: {json.dumps({'type': 'thought_token', 'content': think_part}, ensure_ascii=False)}\n\n"
 
                                 complete_think_text = "".join(full_thinking_parts).strip()
+                                thoughts_history = [t for t in thoughts_history if t.get("step") != "reasoning"]
                                 reason_item = {
                                     "type": "thought",
                                     "step": "reasoning",
@@ -389,7 +412,7 @@ QUY TẮC ĐỊNH DẠNG VĂN BẢN (MARKDOWN CHUẨN):
                                 yield f"data: {json.dumps(reason_item, ensure_ascii=False)}\n\n"
                                 stream_buffer = after_close
                             else:
-                                safe_cut = max(0, len(stream_buffer) - 9)
+                                safe_cut = max(0, len(stream_buffer) - 18)
                                 if safe_cut > 0:
                                     to_send = stream_buffer[:safe_cut]
                                     stream_buffer = stream_buffer[safe_cut:]
@@ -397,40 +420,61 @@ QUY TẮC ĐỊNH DẠNG VĂN BẢN (MARKDOWN CHUẨN):
                                     yield f"data: {json.dumps({'type': 'thought_token', 'content': to_send}, ensure_ascii=False)}\n\n"
 
                         # 3. Đã kết thúc thẻ <think>, xuất token câu trả lời chính thức
-                        if think_ended and stream_buffer:
-                            if not first_token_sent:
-                                first_token_sent = True
-                                thought = {
-                                    "type": "thought",
-                                    "step": "responding",
-                                    "content": "Bắt đầu xuất câu trả lời cho người dùng..."
-                                }
-                                thoughts_history.append(thought)
-                                yield f"data: {json.dumps(thought, ensure_ascii=False)}\n\n"
+                        if think_ended and not in_think_tag and stream_buffer:
+                            # Giữ lại phần đuôi nếu nghi ngờ đang mở thẻ <think> hoặc call: dở dang
+                            hold_back = 0
+                            if "<" in stream_buffer[-16:]:
+                                hold_back = len(stream_buffer) - stream_buffer.rfind("<")
+                            elif "call:" in stream_buffer[-30:]:
+                                hold_back = len(stream_buffer) - stream_buffer.rfind("call:")
 
-                            full_answer_parts.append(stream_buffer)
-                            yield f"data: {json.dumps({'type': 'token', 'content': stream_buffer}, ensure_ascii=False)}\n\n"
-                            stream_buffer = ""
+                            emit_len = len(stream_buffer) - hold_back
+                            if emit_len > 0:
+                                to_emit = stream_buffer[:emit_len]
+                                to_emit = re.sub(r"call:(?:default_api:)?[a-zA-Z0-9_]+\s*\{.*?\}", "", to_emit, flags=re.DOTALL)
+                                stream_buffer = stream_buffer[emit_len:]
+                                if to_emit:
+                                    if not first_token_sent:
+                                        first_token_sent = True
+                                        thought = {
+                                            "type": "thought",
+                                            "step": "responding",
+                                            "content": "Bắt đầu xuất câu trả lời cho người dùng..."
+                                        }
+                                        thoughts_history.append(thought)
+                                        yield f"data: {json.dumps(thought, ensure_ascii=False)}\n\n"
+
+                                    full_answer_parts.append(to_emit)
+                                    yield f"data: {json.dumps({'type': 'token', 'content': to_emit}, ensure_ascii=False)}\n\n"
 
             # Xử lý phần còn tồn đọng trong buffer nếu kết thúc stream
-            if in_think_tag and stream_buffer:
-                full_thinking_parts.append(stream_buffer)
-                yield f"data: {json.dumps({'type': 'thought_token', 'content': stream_buffer}, ensure_ascii=False)}\n\n"
-                complete_think_text = "".join(full_thinking_parts).strip()
-                reason_item = {
-                    "type": "thought",
-                    "step": "reasoning",
-                    "content": complete_think_text
-                }
-                thoughts_history.append(reason_item)
-                yield f"data: {json.dumps(reason_item, ensure_ascii=False)}\n\n"
-            elif think_ended and stream_buffer:
-                full_answer_parts.append(stream_buffer)
-                yield f"data: {json.dumps({'type': 'token', 'content': stream_buffer}, ensure_ascii=False)}\n\n"
-            elif not think_ended and stream_buffer:
-                full_answer_parts.append(stream_buffer)
-                yield f"data: {json.dumps({'type': 'token', 'content': stream_buffer}, ensure_ascii=False)}\n\n"
+            if stream_buffer:
+                cleaned_rem = re.sub(r"</?(?:think|thought|quist|accessibility)>", "", stream_buffer)
+                cleaned_rem = re.sub(r"call:(?:default_api:)?[a-zA-Z0-9_]+\s*\{.*?\}", "", cleaned_rem, flags=re.DOTALL)
+                if in_think_tag:
+                    if cleaned_rem.strip():
+                        full_thinking_parts.append(cleaned_rem)
+                        yield f"data: {json.dumps({'type': 'thought_token', 'content': cleaned_rem}, ensure_ascii=False)}\n\n"
+                    complete_think_text = "".join(full_thinking_parts).strip()
+                    thoughts_history = [t for t in thoughts_history if t.get("step") != "reasoning"]
+                    reason_item = {
+                        "type": "thought",
+                        "step": "reasoning",
+                        "content": complete_think_text
+                    }
+                    thoughts_history.append(reason_item)
+                    yield f"data: {json.dumps(reason_item, ensure_ascii=False)}\n\n"
+                elif cleaned_rem:
+                    full_answer_parts.append(cleaned_rem)
+                    yield f"data: {json.dumps({'type': 'token', 'content': cleaned_rem}, ensure_ascii=False)}\n\n"
 
+            # Bảo vệ chống câu trả lời rỗng (nếu LLM quên đóng thẻ </think> ở lượt cuối)
+            if not "".join(full_answer_parts).strip() and full_thinking_parts:
+                fallback_text = "".join(full_thinking_parts).strip()
+                fallback_text = re.sub(r"call:(?:default_api:)?[a-zA-Z0-9_]+\s*\{.*?\}", "", fallback_text, flags=re.DOTALL).strip()
+                if fallback_text:
+                    full_answer_parts.append(fallback_text)
+                    yield f"data: {json.dumps({'type': 'token', 'content': fallback_text}, ensure_ascii=False)}\n\n"
 
             # 2. Hoàn tất toàn bộ luồng
             complete_thought = {
@@ -446,7 +490,7 @@ QUY TẮC ĐỊNH DẠNG VĂN BẢN (MARKDOWN CHUẨN):
             latest_checkpoint_id = latest_state.config["configurable"].get("checkpoint_id")
 
             # Lưu Assistant Message vào DB
-            full_answer = "".join(full_answer_parts)
+            full_answer = "".join(full_answer_parts).strip()
             asst_msg_id = db_service.save_message(
                 session_id=session_id,
                 role="assistant",

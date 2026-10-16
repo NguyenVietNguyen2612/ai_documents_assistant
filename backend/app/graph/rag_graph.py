@@ -4,11 +4,14 @@ if os.path.exists("/etc/ssl/certs/ca-certificates.crt"):
     os.environ.setdefault("SSL_CERT_FILE", "/etc/ssl/certs/ca-certificates.crt")
     os.environ.setdefault("CURL_CA_BUNDLE", "/etc/ssl/certs/ca-certificates.crt")
 
+import re
+import json
+import uuid
 import aiosqlite
 from langgraph.graph import StateGraph, START, END
 from langgraph.prebuilt import ToolNode, tools_condition
 from langchain_google_genai import ChatGoogleGenerativeAI
-from langchain_core.messages import HumanMessage, ToolMessage, SystemMessage
+from langchain_core.messages import HumanMessage, ToolMessage, SystemMessage, AIMessage
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
 from app.graph.state import AgentState
@@ -49,9 +52,95 @@ def _extract_latest_question(messages) -> str:
     return ""
 
 
+def _extract_text_from_content(content) -> str:
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts = []
+        for p in content:
+            if isinstance(p, dict) and "text" in p:
+                parts.append(p["text"])
+            elif isinstance(p, str):
+                parts.append(p)
+        return "".join(parts)
+    return str(content or "")
+
+
+def _sanitize_messages_for_llm(messages) -> list:
+    """
+    Làm sạch các AIMessage từ các lượt hội thoại trước (loại bỏ khối <think>...</think> cũ)
+    để tránh việc mô hình bắt chước sinh thẻ <think> văn bản thô thay vì gọi structured tool_calls ở lượt mới.
+    """
+    last_human_idx = -1
+    for i in range(len(messages) - 1, -1, -1):
+        if isinstance(messages[i], HumanMessage):
+            last_human_idx = i
+            break
+
+    sanitized = []
+    for idx, msg in enumerate(messages):
+        if idx == 0 and isinstance(msg, SystemMessage):
+            content_str = _extract_text_from_content(msg.content)
+            if "TUYỆT ĐỐI KHÔNG sinh thẻ <think>" not in content_str:
+                from app.services.agent_service import AgentService
+                sanitized.append(SystemMessage(content=AgentService.SYSTEM_PROMPT))
+            else:
+                sanitized.append(msg)
+        elif idx < last_human_idx and isinstance(msg, AIMessage) and not getattr(msg, "tool_calls", None):
+            raw_text = _extract_text_from_content(msg.content)
+            cleaned = re.sub(r"<(?:think|thought)>.*?</(?:think|thought|quist)>", "", raw_text, flags=re.DOTALL)
+            cleaned = re.sub(r"<accessibility>.*?</accessibility>", "", cleaned, flags=re.DOTALL)
+            cleaned = re.sub(r"</?(?:think|thought|quist|accessibility)>", "", cleaned)
+            cleaned = re.sub(r"call:(?:default_api:)?[a-zA-Z0-9_]+\s*\{.*?\}", "", cleaned, flags=re.DOTALL).strip()
+            if not cleaned:
+                cleaned = "(Đã phản hồi)"
+            sanitized.append(AIMessage(content=cleaned))
+        else:
+            sanitized.append(msg)
+    return sanitized
+
+
+def _rescue_text_tool_calls(response: AIMessage, valid_tool_names: set) -> AIMessage:
+    """
+    Nếu LLM vô tình xuất lệnh gọi tool dưới dạng text `call:default_api:tool_name{...}`
+    thay vì structured tool_calls, tự động bóc tách và chuyển thành tool_calls chuẩn cho LangGraph.
+    """
+    if getattr(response, "tool_calls", None):
+        return response
+
+    raw_text = _extract_text_from_content(response.content)
+    if "call:" not in raw_text:
+        return response
+
+    pattern = r"call:(?:default_api:)?([a-zA-Z0-9_]+)\s*(\{.*?\})"
+    rescued_calls = []
+    for match in re.finditer(pattern, raw_text, flags=re.DOTALL):
+        t_name, t_args_str = match.groups()
+        if t_name in valid_tool_names:
+            try:
+                parsed_args = json.loads(t_args_str) if t_args_str.strip() else {}
+            except Exception:
+                parsed_args = {}
+            rescued_calls.append({
+                "name": t_name,
+                "args": parsed_args if isinstance(parsed_args, dict) else {},
+                "id": f"call_{uuid.uuid4().hex[:8]}",
+                "type": "tool_call",
+            })
+
+    if rescued_calls:
+        print(f"[Agent] Đã phục hồi {len(rescued_calls)} tool_call từ định dạng text: {[c['name'] for c in rescued_calls]}")
+        cleaned_text = re.sub(pattern, "", raw_text, flags=re.DOTALL).strip()
+        response.content = cleaned_text
+        response.tool_calls = rescued_calls
+
+    return response
+
+
 def create_agent_graph(llm, tools, checkpointer=None, decision_service: LayaDecisionService = None):
     builder = StateGraph(AgentState)
     router_service = decision_service or laya_service
+    valid_tool_names = {getattr(t, "name", "") for t in tools}
 
     # Ràng buộc bộ công cụ Multi-Tool vào LLM
     llm_with_tools = llm.bind_tools(tools)
@@ -69,7 +158,7 @@ def create_agent_graph(llm, tools, checkpointer=None, decision_service: LayaDeci
 
     # 2. Định nghĩa Agent Node (ReAct + Corrective RAG)
     def agent_node(state: AgentState):
-        messages = state["messages"]
+        messages = _sanitize_messages_for_llm(state["messages"])
         route_action = state.get("route_action", "retrieve")
 
         # Đếm số lần công cụ đã được gọi trong lượt câu hỏi hiện tại
@@ -78,7 +167,7 @@ def create_agent_graph(llm, tools, checkpointer=None, decision_service: LayaDeci
         if tool_calls_count >= 3:
             print("[Agent] Đã đạt giới hạn 3 lần gọi công cụ trong lượt này. Ép buộc tổng hợp trả lời...")
             forced_response = llm.invoke(messages + [
-                SystemMessage(content="Bạn đã đạt giới hạn tối đa 3 lần tra cứu công cụ cho câu hỏi này. BẮT BUỘC KHÔNG GỌI CÔNG CỤ THÊM. Hãy mở đầu bằng khối <think>...</think> để phân tích tổng hợp toàn bộ dữ liệu đã thu thập được, sau đó đưa ra câu trả lời cuối cùng. LƯU Ý BẮT BUỘC: Không dùng các ký hiệu Markdown như **, ##. Nếu phân cấp hoặc liệt kê, chỉ dùng -, +, . hoặc số thứ tự ở đầu dòng.")
+                HumanMessage(content="[Hệ thống]: Bạn đã đạt giới hạn tối đa 3 lần tra cứu công cụ cho câu hỏi này. BẮT BUỘC KHÔNG GỌI CÔNG CỤ THÊM. Hãy mở đầu bằng khối <think>...</think> để phân tích tổng hợp toàn bộ dữ liệu đã thu thập được, sau đó đóng thẻ </think> và đưa ra câu trả lời chi tiết cuối cùng cho người dùng.")
             ])
             return {"messages": [forced_response]}
 
@@ -90,6 +179,7 @@ def create_agent_graph(llm, tools, checkpointer=None, decision_service: LayaDeci
 
         # Ngược lại: Chạy vòng lặp ReAct với bộ công cụ Multi-Tool
         response = llm_with_tools.invoke(messages)
+        response = _rescue_text_tool_calls(response, valid_tool_names)
         return {"messages": [response]}
 
     builder.add_node("router", router_node)
@@ -149,7 +239,6 @@ def _get_llm_and_tools():
         _llm = ChatGoogleGenerativeAI(
             model=model_name,
             google_api_key=os.environ.get("GEMINI_API_KEY", ""),
-            temperature=0,
         )
     return _llm, _tools
 
