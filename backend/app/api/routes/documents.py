@@ -27,26 +27,29 @@ def get_documents():
 
 
 @router.get("/documents/{document_id}/file")
-def get_document_file(document_id: str):
-    """Phục vụ file tài liệu gốc để hiển thị xem trước (preview) trên giao diện theo số trang."""
+def get_document_file(document_id: str, download: bool = False):
+    """Phục vụ file tài liệu gốc để hiển thị xem trước (preview) trực tiếp trên giao diện."""
     matching_files = list(DOCS_DIR.glob(f"{document_id}.*"))
     if not matching_files:
         raise HTTPException(status_code=404, detail="File tài liệu không tồn tại trên hệ thống")
     
     target_file = matching_files[0]
     ext = target_file.suffix.lower()
+    # Dùng text/plain cho các file văn bản/bảng để trình duyệt luôn mở inline thay vì tự tải về
     media_map = {
         ".pdf": "application/pdf",
-        ".csv": "text/csv; charset=utf-8",
+        ".csv": "text/plain; charset=utf-8",
         ".txt": "text/plain; charset=utf-8",
-        ".md": "text/markdown; charset=utf-8",
+        ".md": "text/plain; charset=utf-8",
     }
     media_type = media_map.get(ext, "application/octet-stream")
+    disposition = "attachment" if download else "inline"
 
     return FileResponse(
         path=target_file,
         media_type=media_type,
         filename=target_file.name,
+        content_disposition_type=disposition,
     )
 
 
