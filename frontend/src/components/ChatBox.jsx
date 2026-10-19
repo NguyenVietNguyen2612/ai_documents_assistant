@@ -118,6 +118,8 @@ function ChatBox({
                     const thinkingText = reasoningItem ? reasoningItem.content || reasoningItem.text || "" : ""
                     const sourcesItem = parsedThoughts.find((t) => t.type === "sources" || t.step === "sources")
                     const loadedSources = sourcesItem?.sources || []
+                    const telemetryItem = parsedThoughts.find((t) => t.type === "telemetry" || t.step === "telemetry")
+                    const loadedTelemetry = telemetryItem?.telemetry || null
 
                     return {
                         id: m.id,
@@ -125,6 +127,8 @@ function ChatBox({
                         content: m.content,
                         thoughts: parsedThoughts,
                         sources: loadedSources,
+                        telemetry: loadedTelemetry,
+                        latencyMs: loadedTelemetry?.latency_ms || null,
                         thinkingContent: thinkingText,
                         checkpoint_id: m.checkpoint_id,
                         isThinking: false,
@@ -398,6 +402,18 @@ function ChatBox({
                                 : msg
                         )
                     )
+                } else if (event.type === "telemetry") {
+                    setMessages((previous) =>
+                        previous.map((msg) =>
+                            msg.id === assistantMessageId
+                                ? {
+                                      ...msg,
+                                      telemetry: event.telemetry || null,
+                                      latencyMs: event.telemetry?.latency_ms || msg.latencyMs,
+                                  }
+                                : msg
+                        )
+                    )
                 } else if (event.type === "checkpoint") {
                     setMessages((previous) =>
                         previous.map((msg) =>
@@ -434,7 +450,7 @@ function ChatBox({
                                       ...msg,
                                       isThinking: false,
                                       showThoughts: false,
-                                      latencyMs: elapsed,
+                                      latencyMs: msg.latencyMs || elapsed,
                                   }
                                 : msg
                         )
@@ -554,12 +570,21 @@ function ChatBox({
 
                 {messages.map((message) => {
                     const systemThoughts = (message.thoughts || []).filter(
-                        (t) => t.step !== "reasoning" && t.step !== "sources" && t.type !== "sources"
+                        (t) =>
+                            t.step !== "reasoning" &&
+                            t.step !== "sources" &&
+                            t.type !== "sources" &&
+                            t.step !== "telemetry" &&
+                            t.type !== "telemetry"
                     )
                     const topSourceScore =
-                        message.sources && message.sources.length > 0
+                        message.telemetry?.top_rerank_score ??
+                        (message.sources && message.sources.length > 0
                             ? Math.max(...message.sources.map((s) => Number(s.score || 0)))
-                            : null
+                            : null)
+                    const routerMs = message.telemetry?.router_ms ?? null
+                    const toolCallsCount = message.telemetry?.tool_calls ?? null
+                    const maxLoopSteps = message.telemetry?.max_loops ?? 3
 
                     return (
                         <div
@@ -783,7 +808,7 @@ function ChatBox({
                                                                             snippet: src.snippet,
                                                                         })
                                                                     }
-                                                                    title={`Nhấp để đối chiếu trang ${src.page} của ${src.document_name}`}
+                                                                    title={`Nhấp để đối chiếu trang ${src.page_range || src.page} của ${src.document_name}${src.has_expanded ? ` (Cửa sổ: Chunks ${src.chunk_range})` : ""}`}
                                                                 >
                                                                     <div className="source-card-top">
                                                                         <span className="source-card-doc">
@@ -791,7 +816,7 @@ function ChatBox({
                                                                             <span>{src.document_name}</span>
                                                                         </span>
                                                                         <span className="source-card-page">
-                                                                            Trang {src.page}
+                                                                            Trang {src.page_range || src.page}
                                                                         </span>
                                                                     </div>
                                                                     <div className="source-card-meta">
@@ -817,9 +842,17 @@ function ChatBox({
                                             <div className="assistant-telemetry-bar">
                                                 <div className="telemetry-metrics">
                                                     {message.latencyMs && (
-                                                        <span className="telemetry-chip" title="Tổng thời gian phản hồi">
+                                                        <span className="telemetry-chip" title="Tổng thời gian phản hồi End-to-End">
                                                             <Clock size={11} />
-                                                            <span>{(message.latencyMs / 1000).toFixed(2)}s</span>
+                                                            <span>
+                                                                Tổng thời gian: {(message.latencyMs / 1000).toFixed(2)}s
+                                                            </span>
+                                                        </span>
+                                                    )}
+                                                    {routerMs !== null && (
+                                                        <span className="telemetry-chip" title="Thời gian định tuyến ngữ nghĩa Laya Router (System 1)">
+                                                            <Sparkles size={11} />
+                                                            <span>Laya Router: {routerMs}ms</span>
                                                         </span>
                                                     )}
                                                     {topSourceScore !== null && (
@@ -830,6 +863,17 @@ function ChatBox({
                                                             <Zap size={11} />
                                                             <span>
                                                                 Rerank Top: {(topSourceScore * 100).toFixed(0)}%
+                                                            </span>
+                                                        </span>
+                                                    )}
+                                                    {toolCallsCount !== null && (
+                                                        <span
+                                                            className="telemetry-chip"
+                                                            title="Số bước gọi công cụ của Agent (Tối đa 3 vòng lặp Corrective RAG)"
+                                                        >
+                                                            <Layers size={11} />
+                                                            <span>
+                                                                Bước gọi Tool: {toolCallsCount}/{maxLoopSteps}
                                                             </span>
                                                         </span>
                                                     )}

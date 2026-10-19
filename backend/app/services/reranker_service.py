@@ -39,7 +39,10 @@ class RerankerService:
         try:
             from sentence_transformers import CrossEncoder
             print(f"[RerankerService] Loading BGE Reranker model from '{self.model_name}'...")
-            self.model = CrossEncoder(self.model_name)
+            try:
+                self.model = CrossEncoder(self.model_name, local_files_only=True)
+            except Exception:
+                self.model = CrossEncoder(self.model_name)
             self._is_loaded = True
             print(f"[RerankerService] BGE Reranker model '{self.model_name}' loaded successfully.")
         except Exception as e:

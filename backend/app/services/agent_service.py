@@ -16,11 +16,17 @@ BỘ CÔNG CỤ CỦA BẠN (MULTI-TOOL):
 3. `get_document_overview`: Lấy cấu trúc đề mục (mục lục) và nội dung mở đầu/kết luận của một tài liệu. Dùng khi người dùng yêu cầu tóm tắt tổng quan một tài liệu hoặc hỏi bố cục toàn bài.
 4. `calculate_metrics`: Máy tính toán học chính xác. Dùng khi cần tính toán số liệu, độ chênh lệch, tỷ lệ phần trăm từ các con số trong tài liệu.
 
-QUY TẮC HOẠT ĐỘNG & CORRECTIVE RAG:
+QUY TẮC HOẠT ĐỘNG & CORRECTIVE RAG (SELF-CORRECTION):
 1. Luôn sử dụng công cụ phù hợp ĐẦU TIÊN nếu câu hỏi liên quan đến tài liệu hoặc số liệu.
-2. CƠ CHẾ CORRECTIVE RAG (Tự đánh giá & Viết lại truy vấn): Nếu kết quả từ `retrieve_documents` có cảnh báo độ khớp thấp hoặc chưa chứa đủ thông tin cần thiết, bạn HÃY TỰ ĐỘNG gọi lại `retrieve_documents` với từ khóa được viết lại (Query Rewriting: dùng thuật ngữ tiếng Anh chuyên ngành, từ đồng nghĩa hoặc bỏ lọc tên file).
-3. Tuyệt đối không tự bịa ra thông tin. Nếu sau khi thử tìm kiếm lại vẫn không có thông tin, hãy thành thật nói rằng tài liệu không đề cập đến vấn đề này.
-4. Nếu câu hỏi là giao tiếp thông thường (ví dụ: "Chào bạn", "Bạn có thể làm gì?"), bạn có thể trả lời trực tiếp mà KHÔNG CẦN gọi công cụ.
+2. CƠ CHẾ SMALL-TO-BIG WINDOW EXPANSION: Khi tra cứu tài liệu, hệ thống tự động mở rộng sang các phân đoạn liền kề (Chunks Window) để bảo toàn ngữ cảnh trọn vẹn, không bị đứt gãy ý ở ranh giới cắt đoạn. Hãy tận dụng tối đa ngữ cảnh mở rộng này.
+3. CƠ CHẾ CORRECTIVE RAG (Tự đánh giá & Viết lại truy vấn): 
+   - Nếu kết quả từ `retrieve_documents` có nhãn `[CẢNH BÁO ĐỘ TIN CẬY THẤP]` hoặc không tìm thấy thông tin, bạn BẮT BUỘC KHÔNG KẾT LUẬN VỘI VÀNG.
+   - Hãy tự động THỰC HIỆN QUERY REWRITING:
+     + Nếu người dùng hỏi bằng tiếng Việt mà tài liệu nghiên cứu là tiếng Anh: Dịch và viết lại từ khóa sang tiếng Anh học thuật (ví dụ: "vấn đề chính của FreqNet" -> "main limitation problem of FreqNet hard masking").
+     + Nếu truy vấn quá dài hoặc có tên tài liệu sai: Rút ngắn thành 2-4 từ khóa chuyên môn cốt lõi và bỏ lọc tên tài liệu để tìm kiếm diện rộng.
+     + Kích hoạt gọi lại công cụ `retrieve_documents` lần 2 hoặc lần 3 với truy vấn đã được tinh chỉnh.
+4. Tuyệt đối không tự bịa ra thông tin. Nếu sau khi đã thử tự sửa truy vấn (Query Rewriting) mà vẫn không tìm thấy bằng chứng, hãy khẳng định rõ ràng và trung thực rằng tài liệu hiện tại không đề cập đến thông tin này.
+5. Nếu câu hỏi là giao tiếp thông thường (ví dụ: "Chào bạn", "Bạn có thể làm gì?"), bạn có thể trả lời trực tiếp mà KHÔNG CẦN gọi công cụ.
 
 QUY TẮC TRÍCH DẪN NGUỒN (CITATIONS - BẮT BUỘC):
 1. Khi cung cấp câu trả lời có chứa dữ kiện hoặc số liệu từ tài liệu, bạn BẮT BUỘC phải đặt thẻ trích dẫn nguồn ngay cạnh thông tin đó theo đúng định dạng chuẩn:
@@ -61,6 +67,11 @@ QUY TẮC ĐỊNH DẠNG VĂN BẢN (MARKDOWN CHUẨN):
         session_id: str = "default",
         checkpoint_id: Optional[str] = None
     ) -> dict:
+        import time
+        import re
+        from langchain_core.messages import ToolMessage
+
+        t0 = time.perf_counter()
         graph = await self._get_graph()
         config = {"configurable": {"thread_id": session_id}}
         if checkpoint_id:
@@ -69,6 +80,7 @@ QUY TẮC ĐỊNH DẠNG VĂN BẢN (MARKDOWN CHUẨN):
         # Kiểm tra state hiện tại của thread
         state = await graph.aget_state(config)
         existing_msgs = state.values.get("messages", []) if state else []
+        prior_len = len(existing_msgs)
 
         if not existing_msgs:
             messages = [
@@ -79,26 +91,39 @@ QUY TẮC ĐỊNH DẠNG VĂN BẢN (MARKDOWN CHUẨN):
             messages = [HumanMessage(content=question)]
 
         result = await graph.ainvoke({"messages": messages}, config=config)
-        final_message = result["messages"][-1]
+        all_msgs = result.get("messages", [])
+        new_msgs = all_msgs[prior_len:] if prior_len < len(all_msgs) else all_msgs
+
+        # Trích xuất toàn bộ ngữ cảnh thu được từ các ToolMessage trong lượt hỏi này
+        tool_contexts = []
+        for msg in new_msgs:
+            if isinstance(msg, ToolMessage) or getattr(msg, "type", "") == "tool":
+                content_str = msg.content if isinstance(msg.content, str) else str(msg.content)
+                if content_str.strip():
+                    tool_contexts.append(content_str.strip())
+
+        final_message = all_msgs[-1]
         raw_answer = final_message.content
 
         if isinstance(raw_answer, list):
             text_parts = [part["text"] for part in raw_answer if isinstance(part, dict) and "text" in part]
             raw_answer = "".join(text_parts) if text_parts else str(raw_answer)
 
-        import re
         clean_answer = re.sub(r'<(?:think|thought)>.*?</(?:think|thought|quist)>', '', raw_answer, flags=re.DOTALL)
         clean_answer = re.sub(r'<accessibility>.*?</accessibility>', '', clean_answer, flags=re.DOTALL).strip()
 
         # Lấy checkpoint id sau khi hoàn thành
         new_state = await graph.aget_state(config)
         new_checkpoint_id = new_state.config["configurable"].get("checkpoint_id")
+        latency_ms = round((time.perf_counter() - t0) * 1000, 1)
 
         return {
             "answer": clean_answer,
             "session_id": session_id,
             "checkpoint_id": new_checkpoint_id,
-            "context": ""
+            "context": "\n\n---\n\n".join(tool_contexts),
+            "tool_calls_count": len(tool_contexts),
+            "latency_ms": latency_ms,
         }
 
 
@@ -170,6 +195,12 @@ QUY TẮC ĐỊNH DẠNG VĂN BẢN (MARKDOWN CHUẨN):
 
         first_token_sent = False
         iteration = 0
+        import time
+        stream_start_time = time.perf_counter()
+        router_start_time = time.perf_counter()
+        router_ms: Optional[float] = None
+        tool_calls_count = 0
+        top_rerank_score: Optional[float] = None
 
         try:
             async for event in graph.astream_events(initial_input, config=config, version="v2"):
@@ -177,8 +208,12 @@ QUY TẮC ĐỊNH DẠNG VĂN BẢN (MARKDOWN CHUẨN):
                 name = event.get("name", "")
                 data = event.get("data", {})
 
+                if event_type == "on_chain_start" and name == "router":
+                    router_start_time = time.perf_counter()
+
                 # Khi Laya Decision Router (System 1) hoàn tất phân loại
-                if event_type == "on_chain_end" and name == "router":
+                elif event_type == "on_chain_end" and name == "router":
+                    router_ms = round((time.perf_counter() - router_start_time) * 1000, 1)
                     output = data.get("output", {}) or {}
                     r_action = output.get("route_action", "retrieve") if isinstance(output, dict) else "retrieve"
                     r_reason = output.get("route_reason", "") if isinstance(output, dict) else ""
@@ -186,7 +221,7 @@ QUY TẮC ĐỊNH DẠNG VĂN BẢN (MARKDOWN CHUẨN):
                     router_thought = {
                         "type": "thought",
                         "step": "router",
-                        "content": f"Laya Decision Router: Quyết định '{r_action}' -> {action_label}. ({r_reason})"
+                        "content": f"Laya Decision Router ({router_ms}ms): Quyết định '{r_action}' -> {action_label}. ({r_reason})"
                     }
                     thoughts_history.append(router_thought)
                     yield f"data: {json.dumps(router_thought, ensure_ascii=False)}\n\n"
@@ -249,6 +284,7 @@ QUY TẮC ĐỊNH DẠNG VĂN BẢN (MARKDOWN CHUẨN):
 
                 # Khi Agent kích hoạt Tool
                 elif event_type == "on_tool_start":
+                    tool_calls_count += 1
                     tool_input = data.get("input", {})
                     if name == "retrieve_documents":
                         query = tool_input.get("query", "") if isinstance(tool_input, dict) else str(tool_input)
@@ -310,6 +346,9 @@ QUY TẮC ĐỊNH DẠNG VĂN BẢN (MARKDOWN CHUẨN):
                                 })
 
                             if extracted_sources:
+                                max_s = max(s["score"] for s in extracted_sources)
+                                if top_rerank_score is None or max_s > top_rerank_score:
+                                    top_rerank_score = max_s
                                 sources_event = {
                                     "type": "sources",
                                     "step": "sources",
@@ -477,13 +516,27 @@ QUY TẮC ĐỊNH DẠNG VĂN BẢN (MARKDOWN CHUẨN):
                     yield f"data: {json.dumps({'type': 'token', 'content': fallback_text}, ensure_ascii=False)}\n\n"
 
             # 2. Hoàn tất toàn bộ luồng
+            total_latency_ms = round((time.perf_counter() - stream_start_time) * 1000, 1)
             complete_thought = {
                 "type": "thought",
                 "step": "complete",
-                "content": "Hoàn tất toàn bộ quy trình suy luận và phản hồi."
+                "content": f"Hoàn tất toàn bộ quy trình suy luận và phản hồi ({total_latency_ms}ms)."
             }
             thoughts_history.append(complete_thought)
             yield f"data: {json.dumps(complete_thought, ensure_ascii=False)}\n\n"
+
+            telemetry_event = {
+                "type": "telemetry",
+                "step": "telemetry",
+                "telemetry": {
+                    "latency_ms": total_latency_ms,
+                    "router_ms": router_ms,
+                    "tool_calls": tool_calls_count,
+                    "top_rerank_score": top_rerank_score,
+                },
+            }
+            thoughts_history.append(telemetry_event)
+            yield f"data: {json.dumps(telemetry_event, ensure_ascii=False)}\n\n"
 
             # Lấy Checkpoint ID mới nhất từ LangGraph state
             latest_state = await graph.aget_state({"configurable": {"thread_id": session_id}})

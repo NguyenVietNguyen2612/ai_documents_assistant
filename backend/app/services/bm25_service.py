@@ -172,6 +172,23 @@ class BM25Service:
 
         return results
 
+    def get_neighboring_chunks(
+        self,
+        document_id: str,
+        chunk_index: int,
+        window_size: int = 1,
+    ) -> List[Dict[str, Any]]:
+        """Lấy các chunk liền kề từ bộ nhớ in-memory của BM25."""
+        if not document_id or chunk_index is None or not self.documents:
+            return []
+        target_indices = set(range(max(0, chunk_index - window_size), chunk_index + window_size + 1))
+        matched = [
+            doc for doc in self.documents
+            if doc.get("document_id") == document_id and doc.get("chunk_index") in target_indices
+        ]
+        matched.sort(key=lambda d: d.get("chunk_index", 0))
+        return matched
+
     def sync_from_milvus(self, vector_store):
         """
         Đồng bộ dữ liệu hiện có trong Milvus vào BM25 khi ứng dụng khởi động.

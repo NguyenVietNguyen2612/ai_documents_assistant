@@ -4,9 +4,11 @@ from sentence_transformers import SentenceTransformer
 class EmbeddingService:
 
     def __init__(self):
-        self.model = SentenceTransformer(
-            "paraphrase-multilingual-MiniLM-L12-v2"
-        )
+        model_name = "paraphrase-multilingual-MiniLM-L12-v2"
+        try:
+            self.model = SentenceTransformer(model_name, local_files_only=True)
+        except Exception:
+            self.model = SentenceTransformer(model_name)
 
     def embed_text(
         self,

@@ -28,7 +28,10 @@ class ContextBuilder:
             entity = result.get("entity", {})
             doc_name = entity.get("document_name", "Unknown")
             page = entity.get("page", 1)
-            text = entity.get("text", "")
+            page_range = entity.get("page_range", str(page))
+            chunk_range = entity.get("chunk_range", str(entity.get("chunk_index", 0)))
+            has_expanded = entity.get("has_expanded", False)
+            text = entity.get("expanded_text") or entity.get("text", "")
 
             raw_score = result.get(
                 "normalized_score",
@@ -47,9 +50,11 @@ class ContextBuilder:
                 if max_norm_score is None or norm_score > max_norm_score:
                     max_norm_score = norm_score
 
-            context = f"""[Source {i}] [Tài liệu: {doc_name} - Trang {page}] ({score_str.lstrip(' | ') if score_str else ''})
+            window_tag = f" | Cửa sổ Small-to-Big: Chunks {chunk_range}" if has_expanded else ""
+            context = f"""[Source {i}] [Tài liệu: {doc_name} - Trang {page_range}] ({score_str.lstrip(' | ') if score_str else ''}{window_tag})
 Document: {doc_name}
-Page: {page}
+Page: {page_range}
+{f'Chunks Window: {chunk_range}' if has_expanded else f'Chunk Index: {chunk_range}'}
 
 {text}
 """
@@ -57,13 +62,22 @@ Page: {page}
 
         joined_context = "\n".join(contexts)
 
-        # Corrective RAG: Nếu điểm chuẩn hóa cao nhất thấp hơn ngưỡng 0.40 -> Cảnh báo Agent viết lại truy vấn
+        # Corrective RAG: Đánh giá độ tin cậy và kích hoạt phản xạ tự sửa truy vấn (Self-Correction)
         if max_norm_score is not None and max_norm_score < self.LOW_CONFIDENCE_THRESHOLD:
             joined_context += (
-                f"\n[ĐÁNH GIÁ CORRECTIVE RAG]: Độ tin cậy ngữ cảnh cao nhất đạt {max_norm_score:.2f}/1.00 "
-                f"(thấp hơn ngưỡng chuẩn {self.LOW_CONFIDENCE_THRESHOLD:.2f}). "
-                "Hãy kiểm tra kỹ xem ngữ cảnh trên có thực sự trả lời đúng câu hỏi không. "
-                "Nếu chưa đủ thông tin, hãy gọi lại công cụ `retrieve_documents` với từ khóa khác (Query Rewriting - dùng từ đồng nghĩa hoặc thuật ngữ tiếng Anh tương ứng)."
+                f"\n[ĐÁNH GIÁ CORRECTIVE RAG - CẢNH BÁO ĐỘ TIN CẬY THẤP]:\n"
+                f"Độ tin cậy ngữ cảnh cao nhất chỉ đạt {max_norm_score:.2f}/1.00 (thấp hơn ngưỡng chuẩn {self.LOW_CONFIDENCE_THRESHOLD:.2f}).\n"
+                "HÀNH ĐỘNG BẮT BUỘC CỦA AGENT:\n"
+                "1. TUYỆT ĐỐI KHÔNG KẾT LUẬN VỘI VÀNG rằng tài liệu không có thông tin khi mới tra cứu 1 lần.\n"
+                "2. Hãy tự động THỰC HIỆN QUERY REWRITING: dịch/viết lại truy vấn sang thuật ngữ tiếng Anh chuyên ngành tương ứng, "
+                "hoặc dùng các từ đồng nghĩa kỹ thuật ngắn gọn hơn, rồi gọi lại `retrieve_documents` (lần 2/3).\n"
+                "3. Chỉ kết luận tài liệu không đề cập nếu sau khi đã thử viết lại truy vấn mà vẫn không tìm thấy bằng chứng."
+            )
+        elif max_norm_score is not None and max_norm_score >= self.HIGH_CONFIDENCE_THRESHOLD:
+            joined_context += (
+                f"\n[ĐÁNH GIÁ CORRECTIVE RAG - ĐỘ TIN CẬY CAO]:\n"
+                f"Ngữ cảnh thu được đạt độ tin cậy cao {max_norm_score:.2f}/1.00. "
+                "Đầy đủ thông tin chính xác để tổng hợp câu trả lời chi tiết và trích dẫn số trang tương ứng."
             )
 
         return joined_context
@@ -79,7 +93,13 @@ Page: {page}
             doc_name = entity.get("document_name", "Unknown")
             doc_id = entity.get("document_id", "")
             page = entity.get("page", 1)
-            text = entity.get("text", "")
+            page_range = entity.get("page_range", str(page))
+            chunk_range = entity.get("chunk_range", str(entity.get("chunk_index", 0)))
+            has_expanded = entity.get("has_expanded", False)
+            raw_text = entity.get("text", "")
+            expanded_text = entity.get("expanded_text", "")
+            snippet_text = expanded_text if (expanded_text and len(expanded_text) > 0) else raw_text
+
             raw_score = result.get(
                 "normalized_score",
                 result.get("rerank_score", result.get("score", 0.0)),
@@ -94,9 +114,12 @@ Page: {page}
                 "source_id": i,
                 "document_name": doc_name,
                 "document_id": doc_id,
-                "page": int(page),
+                "page": int(page) if str(page).isdigit() else 1,
+                "page_range": page_range,
+                "chunk_range": chunk_range,
+                "has_expanded": has_expanded,
                 "score": norm_score,
                 "level": level,
-                "snippet": (text[:280] + "...") if len(text) > 280 else text,
+                "snippet": (snippet_text[:280] + "...") if len(snippet_text) > 280 else snippet_text,
             })
         return sources

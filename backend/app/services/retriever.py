@@ -201,16 +201,96 @@ class Retriever:
             return bm25_hits[:initial_k]
         return []
 
+    def expand_window(
+        self,
+        hits: List[Dict[str, Any]],
+        window_size: int = 1,
+    ) -> List[Dict[str, Any]]:
+        """
+        Small-to-Big Retrieval Window Expansion:
+        Đối với mỗi chunk được chọn lọc ở Top-K, tự động truy xuất các chunk liền kề
+        (trước và sau) trong cùng một tài liệu để mở rộng ngữ cảnh, ngăn chặn tình trạng
+        đoạn văn bị cụt ý ở ranh giới cắt chunk.
+        """
+        if not hits or window_size <= 0:
+            return hits
+
+        expanded_hits = []
+        for hit in hits:
+            item = dict(hit)
+            entity = dict(item.get("entity", {}))
+            doc_id = entity.get("document_id")
+            chunk_idx = entity.get("chunk_index")
+
+            if doc_id and chunk_idx is not None:
+                # 1. Thử lấy chunk liền kề từ VectorStore (Milvus)
+                neighbors = []
+                if hasattr(self.vector_store, "get_neighboring_chunks"):
+                    neighbors = self.vector_store.get_neighboring_chunks(
+                        document_id=doc_id,
+                        chunk_index=chunk_idx,
+                        window_size=window_size,
+                    )
+
+                # 2. Fallback nếu VectorStore không có hoặc trả về rỗng -> lấy từ BM25Service
+                if (not neighbors or len(neighbors) <= 1) and hasattr(self.bm25_service, "get_neighboring_chunks"):
+                    bm25_neighbors = self.bm25_service.get_neighboring_chunks(
+                        document_id=doc_id,
+                        chunk_index=chunk_idx,
+                        window_size=window_size,
+                    )
+                    if bm25_neighbors and len(bm25_neighbors) > len(neighbors):
+                        neighbors = bm25_neighbors
+
+                if neighbors and len(neighbors) > 1:
+                    # Nối văn bản liền mạch không bị lặp ranh giới
+                    merged_parts = []
+                    for n in neighbors:
+                        t = n.get("text", "").strip()
+                        if t and t not in merged_parts:
+                            merged_parts.append(t)
+
+                    min_idx = min(n.get("chunk_index", chunk_idx) for n in neighbors)
+                    max_idx = max(n.get("chunk_index", chunk_idx) for n in neighbors)
+                    pages = sorted(list(set(n.get("page", entity.get("page", 1)) for n in neighbors if n.get("page"))))
+
+                    entity["expanded_text"] = "\n\n".join(merged_parts)
+                    entity["chunk_range"] = f"{min_idx}-{max_idx}"
+                    entity["has_expanded"] = True
+                    entity["page_range"] = (
+                        f"{pages[0]}-{pages[-1]}" if len(pages) > 1 and pages[0] != pages[-1] else str(pages[0])
+                    )
+                else:
+                    entity["expanded_text"] = entity.get("text", "")
+                    entity["chunk_range"] = str(chunk_idx)
+                    entity["has_expanded"] = False
+                    entity["page_range"] = str(entity.get("page", 1))
+            else:
+                entity["expanded_text"] = entity.get("text", "")
+                entity["has_expanded"] = False
+
+            item["entity"] = entity
+            expanded_hits.append(item)
+
+        return expanded_hits
+
     def retrieve(
         self,
         query: str,
         top_k: int = 3,
         document_name: Optional[str] = None,
+        mode: str = "hybrid_rerank",
+        expand_window: bool = True,
+        window_size: int = 1,
     ):
         """
-        Quy trình Two-stage Retrieval:
-        1. Giai đoạn 1 (Recall): Vector Search + BM25 Search kết hợp RRF gom rộng các candidates (10-15 chunks).
-        2. Giai đoạn 2 (Precision): Reranker (BGE base) chấm điểm sâu mối tương quan và chọn lọc ra Top K (mặc định 3) chunks tốt nhất.
+        Quy trình Two-stage Retrieval (hỗ trợ 3 chế độ phục vụ Ablation Study):
+        - mode="vector_only": Chỉ dùng Dense Vector Search trên Milvus.
+        - mode="hybrid_rrf": Kết hợp Dense Vector + BM25 qua thuật toán RRF (không dùng Reranker).
+        - mode="hybrid_rerank" (mặc định):
+            1. Giai đoạn 1 (Recall): Vector Search + BM25 Search kết hợp RRF gom rộng các candidates (10-15 chunks).
+            2. Giai đoạn 2 (Precision): Reranker (BGE base) chấm điểm sâu mối tương quan và chọn lọc ra Top K chunks tốt nhất.
+        - expand_window=True: Kích hoạt Small-to-Big Window Expansion cho các chunk Top-K để không bị mất ngữ cảnh liền kề.
         """
         matched_ids = []
         matched_names = []
@@ -221,7 +301,22 @@ class Retriever:
             else:
                 print(f"[Retriever] Document '{document_name}' not matched directly -> Relaxing filter to all documents.")
 
-        # Lấy rộng ứng viên ở Giai đoạn 1 (ít nhất 10 chunks hoặc gấp 3 lần top_k)
+        # Chế độ 1: Chỉ dùng Dense Vector Search (Baseline)
+        if mode == "vector_only":
+            vector_hits = self.retrieve_vector(
+                query=query,
+                top_k=top_k,
+                document_ids=matched_ids if matched_ids else None,
+                document_name=document_name if not matched_ids else None,
+            )
+            if document_name and not vector_hits:
+                vector_hits = self.retrieve_vector(query=query, top_k=top_k)
+            selected = vector_hits[:top_k]
+            if expand_window:
+                selected = self.expand_window(selected, window_size=window_size)
+            return [selected]
+
+        # Lấy rộng ứng viên ở Giai đoạn 1 (ít nhất 10 chunks hoặc gấp 3 lần top_k) để RRF hợp nhất hiệu quả
         initial_k = max(10, top_k * 3)
 
         # Lần 1: Tìm kiếm Hybrid có lọc theo tài liệu đã resolve (nếu có)
@@ -242,7 +337,14 @@ class Retriever:
                 document_name=None,
             )
 
-        # Giai đoạn 2: Rerank với BGE Base để chọn lọc ra đúng top_k (mặc định 3) candidates
+        # Chế độ 2: Hybrid Search (Vector + BM25 RRF) không qua Cross-Encoder Reranker
+        if mode == "hybrid_rrf":
+            selected = candidates[:top_k]
+            if expand_window:
+                selected = self.expand_window(selected, window_size=window_size)
+            return [selected]
+
+        # Chế độ 3 (Mặc định): Giai đoạn 2 - Rerank với BGE Cross-Encoder để chọn lọc ra đúng top_k candidates
         if self.reranker_service and candidates:
             final_hits = self.reranker_service.rerank(
                 query=query,
@@ -252,5 +354,10 @@ class Retriever:
         else:
             final_hits = candidates[:top_k]
 
-        print(f"[Retriever] Final selected {len(final_hits)} chunks for context.")
+        # Small-to-Big Window Expansion cho các chunks chiến thắng
+        if expand_window:
+            final_hits = self.expand_window(final_hits, window_size=window_size)
+
+        print(f"[Retriever] Final selected {len(final_hits)} chunks for context (expanded_window={expand_window}).")
         return [final_hits]
+

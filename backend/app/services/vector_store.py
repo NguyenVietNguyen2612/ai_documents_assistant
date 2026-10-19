@@ -163,4 +163,50 @@ class VectorStore:
         )
         return list(set(r.get("document_id") for r in res if r.get("document_id")))
 
+    def get_neighboring_chunks(
+        self,
+        document_id: str,
+        chunk_index: int,
+        window_size: int = 1,
+    ) -> list[dict]:
+        """
+        Small-to-Big Window Expansion:
+        Truy xuất các chunk liền kề xung quanh chunk_index trong cùng document_id
+        (từ chunk_index - window_size đến chunk_index + window_size).
+        """
+        if not document_id or chunk_index is None:
+            return []
+        if not self.client.has_collection(self.collection_name):
+            return []
+
+        target_indices = [
+            idx for idx in range(chunk_index - window_size, chunk_index + window_size + 1)
+            if idx >= 0
+        ]
+        if not target_indices:
+            return []
+
+        indices_str = ", ".join(map(str, target_indices))
+        expr = f"document_id == '{document_id}' and chunk_index in [{indices_str}]"
+        try:
+            results = self.client.query(
+                collection_name=self.collection_name,
+                filter=expr,
+                output_fields=[
+                    "id",
+                    "text",
+                    "document_id",
+                    "document_name",
+                    "page",
+                    "chunk_index",
+                ],
+            )
+            # Sắp xếp các đoạn liền kề theo thứ tự chunk_index tăng dần
+            results.sort(key=lambda r: r.get("chunk_index", 0))
+            return results
+        except Exception as e:
+            print(f"[VectorStore] Lỗi khi truy vấn chunk liền kề (Small-to-Big): {e}")
+            return []
+
+
     
