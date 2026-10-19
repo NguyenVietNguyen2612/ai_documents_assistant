@@ -1,24 +1,137 @@
+:root {
+  /* Color Tokens from UI/UX Pro Max Design System */
+  --color-primary: #2563eb;
+  --color-primary-hover: #1d4ed8;
+  --color-primary-soft: #eff6ff;
+  --color-primary-border: #bfdbfe;
+  --color-on-primary: #ffffff;
+
+  --color-secondary: #3b82f6;
+  --color-accent: #ea580c;
+  --color-accent-soft: #fff7ed;
+
+  --color-background: #f8fafc;
+  --color-surface: #ffffff;
+  --color-surface-elevated: rgba(255, 255, 255, 0.88);
+  --color-sidebar: #f1f5f9;
+  --color-foreground: #0f172a;
+  --color-foreground-secondary: #334155;
+  --color-muted: #e9eff8;
+  --color-muted-subtle: #f1f5f9;
+  --color-muted-foreground: #475569;
+  --color-subtle-foreground: #64748b;
+
+  --color-border: #e2e8f0;
+  --color-border-strong: #cbd5e1;
+  --color-destructive: #dc2626;
+  --color-destructive-soft: #fef2f2;
+  --color-success: #16a34a;
+  --color-success-soft: #dcfce7;
+  --color-warning: #d97706;
+  --color-warning-soft: #fef3c7;
+  --color-ring: rgba(37, 99, 235, 0.25);
+
+  /* Spacing Scale */
+  --space-xs: 4px;
+  --space-sm: 8px;
+  --space-md: 16px;
+  --space-lg: 24px;
+  --space-xl: 32px;
+
+  /* Shadows */
+  --shadow-xs: 0 1px 2px rgba(15, 23, 42, 0.04);
+  --shadow-sm: 0 2px 6px rgba(15, 23, 42, 0.05);
+  --shadow-md: 0 6px 16px -4px rgba(15, 23, 42, 0.08);
+  --shadow-lg: 0 12px 28px -6px rgba(15, 23, 42, 0.12);
+  --shadow-xl: 0 24px 48px -12px rgba(15, 23, 42, 0.18);
+
+  /* Radius */
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --radius-xl: 18px;
+
+  /* Typography */
+  --font-sans: "Plus Jakarta Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+
+[data-theme="dark"] {
+  --color-primary: #3b82f6;
+  --color-primary-hover: #60a5fa;
+  --color-primary-soft: rgba(59, 130, 246, 0.15);
+  --color-primary-border: rgba(59, 130, 246, 0.35);
+  --color-on-primary: #ffffff;
+
+  --color-secondary: #60a5fa;
+  --color-accent: #f97316;
+  --color-accent-soft: rgba(249, 115, 22, 0.15);
+
+  --color-background: #0b0f19;
+  --color-surface: #111827;
+  --color-surface-elevated: rgba(17, 24, 39, 0.88);
+  --color-sidebar: #0f172a;
+  --color-foreground: #f8fafc;
+  --color-foreground-secondary: #cbd5e1;
+  --color-muted: #1e293b;
+  --color-muted-subtle: #1e293b;
+  --color-muted-foreground: #94a3b8;
+  --color-subtle-foreground: #64748b;
+
+  --color-border: #1e293b;
+  --color-border-strong: #334155;
+  --color-destructive: #ef4444;
+  --color-destructive-soft: rgba(239, 68, 68, 0.15);
+  --color-success: #22c55e;
+  --color-success-soft: rgba(34, 197, 94, 0.15);
+  --color-warning: #f59e0b;
+  --color-warning-soft: rgba(245, 158, 11, 0.15);
+  --color-ring: rgba(59, 130, 246, 0.35);
+
+  --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.25);
+  --shadow-sm: 0 2px 6px rgba(0, 0, 0, 0.35);
+  --shadow-md: 0 6px 16px -4px rgba(0, 0, 0, 0.45);
+  --shadow-lg: 0 12px 28px -6px rgba(0, 0, 0, 0.55);
+  --shadow-xl: 0 24px 48px -12px rgba(0, 0, 0, 0.7);
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
 html,
 body,
 #root {
   margin: 0;
   width: 100%;
   height: 100%;
+  overflow: hidden;
 }
 
 body {
-  font-family:
-    Inter,
-    -apple-system,
-    BlinkMacSystemFont,
-    "Segoe UI",
-    sans-serif;
-
-  background: #ffffff;
+  font-family: var(--font-sans);
+  background: var(--color-background);
+  color: var(--color-foreground);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
 }
 
 button,
 input,
 textarea {
   font-family: inherit;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }
