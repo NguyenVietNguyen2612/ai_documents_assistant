@@ -16,15 +16,22 @@
 ## Mục lục
 
 1. [Giới thiệu & Các tính năng chính](#1-giới-thiệu--các-tính-năng-chính)
-2. [Kiến trúc luồng xử lý (Two-System Architecture)](#2-kiến-trúc-luồng-xử-lý-two-system-architecture)
-3. [Quy trình nạp tài liệu và tìm kiếm kết hợp (2-Stage Hybrid Retrieval)](#3-quy-trình-nạp-tài-liệu-và-tìm-kiếm-kết-hợp-2-stage-hybrid-retrieval)
-4. [Thử nghiệm đánh giá hiệu quả (Ablation Study)](#4-thử-nghiệm-đánh-giá-hiệu-quả-ablation-study)
-5. [Các lựa chọn thiết kế kỹ thuật](#5-các-lựa-chọn-thiết-kế-kỹ-thuật)
-6. [Các công cụ của Agent (Multi-Tool Ecosystem)](#6-các-công-cụ-của-agent-multi-tool-ecosystem)
-7. [Kết quả kiểm thử tự động (32/32 tests)](#7-kết-quả-kiểm-thử-tự-động-3232-tests)
-8. [Danh mục REST API](#8-danh-mục-rest-api)
-9. [Hướng dẫn cài đặt & khởi chạy](#9-hướng-dẫn-cài-đặt--khởi-chạy)
-10. [Triển khai với Docker & Kubernetes](#10-triển-khai-với-docker--kubernetes)
+2. [Cấu trúc thư mục dự án](#2-cấu-trúc-thư-mục-dự-án)
+3. [Cấu trúc hệ thống Agent](#3-cấu-trúc-hệ-thống-agent)
+   - [3.1 Sơ đồ kiến trúc Agent](#31-sơ-đồ-kiến-trúc-agent)
+   - [3.2 Quản lý trạng thái (AgentState)](#32-quản-lý-trạng-thái-agentstate)
+   - [3.3 Vòng lặp ReAct và giới hạn số lần gọi tool](#33-vòng-lặp-react-và-giới-hạn-số-lần-gọi-tool)
+   - [3.4 Tách luồng suy luận (Chain-of-Thought)](#34-tách-luồng-suy-luận-chain-of-thought)
+   - [3.5 Lưu trữ Checkpoint và Time-Travel](#35-lưu-trữ-checkpoint-và-time-travel)
+4. [Kiến trúc luồng xử lý (Two-System Architecture)](#4-kiến-trúc-luồng-xử-lý-two-system-architecture)
+5. [Quy trình nạp tài liệu và tìm kiếm kết hợp (2-Stage Hybrid Retrieval)](#5-quy-trình-nạp-tài-liệu-và-tìm-kiếm-kết-hợp-2-stage-hybrid-retrieval)
+6. [Thử nghiệm đánh giá hiệu quả (Ablation Study)](#6-thử-nghiệm-đánh-giá-hiệu-quả-ablation-study)
+7. [Các lựa chọn thiết kế kỹ thuật](#7-các-lựa-chọn-thiết-kế-kỹ-thuật)
+8. [Các công cụ của Agent (Multi-Tool Ecosystem)](#8-các-công-cụ-của-agent-multi-tool-ecosystem)
+9. [Kết quả kiểm thử tự động (32/32 tests)](#9-kết-quả-kiểm-thử-tự-động-3232-tests)
+10. [Danh mục REST API](#10-danh-mục-rest-api)
+11. [Hướng dẫn cài đặt & khởi chạy](#11-hướng-dẫn-cài-đặt--khởi-chạy)
+12. [Triển khai với Docker & Kubernetes](#12-triển-khai-với-docker--kubernetes)
 
 ---
 
@@ -58,90 +65,211 @@ Dự án được xây dựng nhằm mục đích học tập các khái niệm 
 
 ---
 
-## 2. Kiến trúc luồng xử lý (Two-System Architecture)
+## 2. Cấu trúc thư mục dự án
+
+```
+ai_documents_assistant/
+├── backend/
+│   ├── app/
+│   │   ├── api/routes/          # Các endpoint: chat, documents, health
+│   │   ├── graph/               # Định nghĩa đồ thị LangGraph (state, rag_graph, nodes)
+│   │   ├── schemas/             # Pydantic models xác thực dữ liệu request/response
+│   │   ├── services/            # Dịch vụ xử lý: agent, db, document, retriever, bm25, reranker, cache...
+│   │   ├── tools/               # Các công cụ của Agent: retrieve, list, overview, calculator
+│   │   └── main.py              # Điểm khởi chạy ứng dụng FastAPI và vòng đời hệ thống
+│   ├── app_data/                # File cơ sở dữ liệu SQLite cục bộ (lịch sử chat, checkpoint, metadata)
+│   ├── auto_tests/              # Bộ 32 bài kiểm thử tự động (unit, integration, tools, cache, stream)
+│   ├── evaluation/              # Pipeline RAGOps đánh giá định lượng (dataset, target, ablation_study)
+│   ├── Dockerfile               # Cấu hình container cho backend
+│   ├── requirements.txt         # Danh sách thư viện Python
+│   └── .env                     # File cấu hình biến môi trường
+│
+├── frontend/
+│   ├── src/
+│   │   ├── components/          # Các component React: ChatBox, DocumentList, PDFModal, Sidebar...
+│   │   ├── services/            # Xử lý gọi API và nhận SSE stream
+│   │   ├── App.jsx              # Giao diện chính 3 cột
+│   │   └── App.css              # Định dạng giao diện
+│   ├── package.json             # Danh sách dependencies của frontend
+│   └── vite.config.js           # Cấu hình Vite dev server và build
+│
+├── .github/workflows/           # Cấu hình CI/CD GitHub Actions (ci-cd.yml)
+├── k8s/                         # Các file cấu hình triển khai Kubernetes (config, deployment, service)
+├── docker-compose.yml           # Khởi động Milvus, etcd, MinIO, Backend và Frontend
+├── start.sh                     # Script khởi chạy nhanh cho môi trường Linux / macOS
+├── start.bat                    # Script khởi chạy nhanh cho môi trường Windows
+└── README.md                    # Tài liệu hướng dẫn dự án
+```
+
+---
+
+## 3. Cấu trúc hệ thống Agent
+
+Hệ thống sử dụng thư viện LangGraph để quản lý luồng hội thoại dưới dạng đồ thị trạng thái (StateGraph).
+
+### 3.1 Sơ đồ kiến trúc Agent
+
+```mermaid
+%%{init: {
+  'theme': 'base',
+  'themeVariables': {
+    'background': '#000000',
+    'primaryColor': '#000000',
+    'primaryTextColor': '#ffffff',
+    'primaryBorderColor': '#ffffff',
+    'lineColor': '#ffffff',
+    'textColor': '#ffffff',
+    'edgeLabelBackground': '#000000',
+    'clusterBkg': '#000000',
+    'clusterBorder': '#ffffff'
+  }
+}}%%
+flowchart TD
+    Start(["START"]) --> AgentNode["agent_node (LLM)"]
+    AgentNode --> ToolsCond{"tools_condition"}
+    
+    ToolsCond -- "Co yeu cau goi tool (Toi da 3 lan)" --> ToolNode["tool_node (Thuc thi tool)"]
+    ToolNode --> AgentNode
+    
+    ToolsCond -- "Khong goi tool hoac dat gioi han" --> EndNode(["END"])
+
+    classDef default fill:#000000,stroke:#ffffff,stroke-width:1.5px,color:#ffffff;
+```
+
+Mô tả các thành phần và cạnh (edge) trong đồ thị:
+- `START -> agent_node`: Đưa câu hỏi và danh sách tin nhắn lịch sử vào node xử lý chính.
+- `agent_node (LLM)`: Mô hình ngôn ngữ nhận ngữ cảnh, phân tích yêu cầu và quyết định: xuất câu trả lời trực tiếp hoặc phát tín hiệu gọi công cụ.
+- `tools_condition`: Cạnh điều kiện kiểm tra phản hồi từ LLM:
+  - Nếu LLM yêu cầu gọi công cụ và số lượt gọi chưa vượt quá 3 lần: Chuyển tiếp sang `tool_node`.
+  - Nếu không cần gọi công cụ hoặc đã đạt giới hạn 3 lần gọi: Chuyển sang `END`.
+- `tool_node -> agent_node`: Sau khi thực thi công cụ xong, kết quả (`ToolMessage`) được gửi ngược lại về `agent_node` để mô hình tổng hợp câu trả lời cuối cùng.
+
+### 3.2 Quản lý trạng thái (AgentState)
+
+Trạng thái của Agent được định nghĩa thông qua kiểu dữ liệu `AgentState`:
+- Sử dụng danh sách tin nhắn có reducer `add_messages` để nối tiếp các tin nhắn mới (`HumanMessage`, `AIMessage`, `ToolMessage`, `SystemMessage`) vào ngữ cảnh chung của cuộc trò chuyện.
+- Lưu trữ các biến cờ điều khiển luồng như số lượt gọi công cụ hiện tại (`tool_call_count`).
+
+### 3.3 Vòng lặp ReAct và giới hạn số lần gọi tool
+
+- Khi người dùng hỏi thông tin cần tra cứu dữ liệu, Agent phát lệnh gọi công cụ (ví dụ `retrieve_documents`, `calculate_expression`).
+- Nhằm tránh tình trạng mô hình rơi vào vòng lặp gọi công cụ vô hạn khi không tìm thấy thông tin hoặc tìm kiếm không khớp, hệ thống đặt giới hạn tối đa **3 lần gọi công cụ**. Khi chạm ngưỡng này, hệ thống dừng tìm kiếm và yêu cầu mô hình phản hồi dựa trên thông tin hiện có.
+
+### 3.4 Tách luồng suy luận (Chain-of-Thought)
+
+- Trong System Prompt, mô hình được hướng dẫn tạo phần suy nghĩ bên trong cặp thẻ `<think>...</think>` trước khi đưa ra câu trả lời chính thức.
+- Tầng backend xử lý luồng stream (SSE) bóc tách các token trong thẻ `<think>` để gửi riêng về client dưới dạng sự kiện suy nghĩ, giúp giao diện hiển thị phần phân tích tách biệt với câu trả lời.
+
+### 3.5 Lưu trữ Checkpoint và Time-Travel
+
+- Sử dụng `AsyncSqliteSaver` để lưu trữ snapshot của từng bước thực thi vào file SQLite (`app_data/checkpoints.db`).
+- Hỗ trợ khôi phục phiên làm việc và quay lui (rollback) trạng thái hội thoại về một tin nhắn bất kỳ trong quá khứ.
+
+---
+
+## 4. Kiến trúc luồng xử lý (Two-System Architecture)
 
 Luồng điều phối hội thoại kết hợp giữa lớp phân loại nhanh và đồ thị trạng thái LangGraph:
 
 ```mermaid
+%%{init: {
+  'theme': 'base',
+  'themeVariables': {
+    'background': '#000000',
+    'primaryColor': '#000000',
+    'primaryTextColor': '#ffffff',
+    'primaryBorderColor': '#ffffff',
+    'lineColor': '#ffffff',
+    'textColor': '#ffffff',
+    'edgeLabelBackground': '#000000',
+    'clusterBkg': '#000000',
+    'clusterBorder': '#ffffff'
+  }
+}}%%
 flowchart TD
-    User["👤 Người dùng / Giao diện React"] --> API["🌐 FastAPI Server (/chat/stream)"]
+    User["Nguoi dung / Giao dien React"] --> API["FastAPI Server (/chat/stream)"]
 
-    subgraph System1 ["⚡ LỚP ĐỊNH TUYẾN NHANH (System 1)"]
-        API --> S1_Router{"Bộ phân loại Laya / Heuristic"}
-        S1_Router -- "Câu chào hỏi / Xã giao" --> S1_Direct["💬 Trả lời trực tiếp"]
-        S1_Router -- "Yêu cầu tra cứu / Phân tích" --> S1_Cache{"Kiểm tra Semantic Cache (Milvus)"}
-        S1_Cache -- "Khớp ngữ nghĩa (≥ 0.95)" --> S1_CacheHit["⚡ Trả kết quả từ Cache"]
+    subgraph System1 ["Lop Dinh Tuyen Nhanh (System 1)"]
+        API --> S1_Router{"Bo phan loai Laya / Heuristic"}
+        S1_Router -- "Chao hoi / Xa giao" --> S1_Direct["Tra loi truc tiep"]
+        S1_Router -- "Yeu cau tra cuu / Phan tich" --> S1_Cache{"Kiem tra Semantic Cache (Milvus)"}
+        S1_Cache -- "Khop ngu nghia (>= 0.95)" --> S1_CacheHit["Tra ket qua tu Cache"]
     end
 
-    subgraph System2 ["🧠 ĐỒ THỊ SUY LUẬN REACT (System 2)"]
-        S1_Cache -- "Chưa có trong Cache" --> AgentNode["🤖 agent_node (Mô hình LLM)"]
+    subgraph System2 ["Do Thi Suy Luan ReAct (System 2)"]
+        S1_Cache -- "Chua co trong Cache" --> AgentNode["agent_node (LLM)"]
         
-        AgentNode --> ToolCond{"tools_condition (Tối đa 3 lượt)"}
+        AgentNode --> ToolCond{"tools_condition (Toi da 3 luot)"}
         
-        ToolCond -- "Cần gọi công cụ" --> ToolNode["🛠️ tool_node"]
+        ToolCond -- "Can goi cong cu" --> ToolNode["tool_node"]
         
-        subgraph ToolsCatalog ["Danh mục công cụ (backend/app/tools/)"]
-            ToolNode --> T1["🔍 retrieve_documents (Hybrid Search + Mở rộng cửa sổ)"]
-            ToolNode --> T2["📋 list_uploaded_documents"]
-            ToolNode --> T3["📄 get_document_overview"]
-            ToolNode --> T4["🧮 calculate_expression (Bộ phân tích cú pháp AST)"]
+        subgraph ToolsCatalog ["Danh muc cong cu (backend/app/tools/)"]
+            ToolNode --> T1["retrieve_documents"]
+            ToolNode --> T2["list_uploaded_documents"]
+            ToolNode --> T3["get_document_overview"]
+            ToolNode --> T4["calculate_expression"]
         end
 
-        ToolsCatalog --> CRAG_Eval{"Đánh giá độ tin cậy"}
-        CRAG_Eval -- "Điểm thấp / Không tìm thấy" --> QueryRewrite["🔄 Gợi ý viết lại truy vấn"]
+        ToolsCatalog --> CRAG_Eval{"Danh gia do tin cay"}
+        CRAG_Eval -- "Diem thap / Khong tim thay" --> QueryRewrite["Goi y viet lai truy van"]
         QueryRewrite --> AgentNode
-        CRAG_Eval -- "Điểm tin cậy cao" --> ToolMsg["📝 Trả về ToolMessage"]
+        CRAG_Eval -- "Diem tin cay cao" --> ToolMsg["Tra ve ToolMessage"]
         ToolMsg --> AgentNode
         
-        ToolCond -- "Hoàn thành câu trả lời" --> Pruner["✂️ Cắt tỉa ngữ cảnh cũ & Sliding Window"]
-        Pruner --> FinalStream["📡 Stream SSE: Nội dung + Suy nghĩ + Telemetry"]
+        ToolCond -- "Hoan thanh cau tra loi" --> Pruner["Cat tia ngu canh cu & Sliding Window"]
+        Pruner --> FinalStream["Stream SSE: Noi dung + Suy nghi + Telemetry"]
     end
 
     FinalStream --> User
     S1_Direct --> User
     S1_CacheHit --> User
 
-    style System1 fill:#f0fdf4,stroke:#16a34a,stroke-width:1.5px,color:#14532d
-    style System2 fill:#eff6ff,stroke:#2563eb,stroke-width:1.5px,color:#1e3a8a
+    classDef default fill:#000000,stroke:#ffffff,stroke-width:1.5px,color:#ffffff;
 ```
-
-### Các thành phần chính trong đồ thị:
-1. **`agent_node`**: Tiếp nhận lịch sử tin nhắn và yêu cầu người dùng, hướng dẫn mô hình suy luận trong thẻ `<think>...</think>` trước khi đưa ra hành động.
-2. **`tools_condition`**: Kiểm tra phản hồi của LLM để quyết định chuyển sang `tool_node` hay kết thúc đồ thị (giới hạn tối đa 3 lần gọi công cụ để tránh lặp vô tận).
-3. **`tool_node`**: Điều hướng thực thi công cụ tương ứng và gửi kết quả về lại cho Agent.
-4. **`Cắt tỉa ngữ cảnh & Sliding Window`**: Nén ngắn các `ToolMessage` từ những lượt hội thoại trước về dạng tóm tắt ngắn ($\le 150$ ký tự) và giữ tối đa 16 tin nhắn gần nhất để kiểm soát số lượng token gửi vào LLM.
-5. **`Lưu trữ Checkpoint`**: Sử dụng `AsyncSqliteSaver` để lưu snapshot từng bước vào SQLite, cho phép khôi phục phiên chat và quay lui trạng thái (Rollback).
 
 ---
 
-## 3. Quy trình nạp tài liệu và tìm kiếm kết hợp (2-Stage Hybrid Retrieval)
+## 5. Quy trình nạp tài liệu và tìm kiếm kết hợp (2-Stage Hybrid Retrieval)
 
 ```mermaid
+%%{init: {
+  'theme': 'base',
+  'themeVariables': {
+    'background': '#000000',
+    'primaryColor': '#000000',
+    'primaryTextColor': '#ffffff',
+    'primaryBorderColor': '#ffffff',
+    'lineColor': '#ffffff',
+    'textColor': '#ffffff',
+    'edgeLabelBackground': '#000000',
+    'clusterBkg': '#000000',
+    'clusterBorder': '#ffffff'
+  }
+}}%%
 flowchart LR
-    subgraph Ingestion ["📥 TIẾP NHẬN & XỬ LÝ TÀI LIỆU"]
-        File["📄 Tệp tải lên (.pdf, .csv, .md, .txt)"] --> DocRoute["/documents/upload"]
-        DocRoute --> BG["⚙️ FastAPI BackgroundTasks"]
-        BG --> Extract["Trích xuất: Gemini Vision OCR + pypdf"]
-        Extract --> Chunking["Phân đoạn theo tiêu đề Markdown + Số trang"]
-        Chunking --> Embed["Tạo Vector: text-embedding-004"]
-        Chunking --> BM25_Idx["Lập chỉ mục từ khóa: BM25 (SQLite)"]
-        Embed --> Milvus_Idx["Lưu trữ Vector: Milvus DB (HNSW Index)"]
+    subgraph Ingestion ["Tiep Nhan & Xu Ly Tai Lieu"]
+        File["Tep tai len (.pdf, .csv, .md, .txt)"] --> DocRoute["/documents/upload"]
+        DocRoute --> BG["FastAPI BackgroundTasks"]
+        BG --> Extract["Trich xuat: Gemini Vision OCR + pypdf"]
+        Extract --> Chunking["Phan doan theo Markdown + So trang"]
+        Chunking --> Embed["Tao Vector: text-embedding-004"]
+        Chunking --> BM25_Idx["Lap chi muc tu khoa: BM25 (SQLite)"]
+        Embed --> Milvus_Idx["Luu tru Vector: Milvus DB"]
     end
 
-    subgraph Retrieval ["🔎 TRUY VẤN 2 GIAI ĐOẠN"]
-        Query["❓ Câu hỏi"] --> Dense["Dense Search (Milvus Cosine)"]
+    subgraph Retrieval ["Truy Van 2 Giai Doan"]
+        Query["Cau hoi"] --> Dense["Dense Search (Milvus Cosine)"]
         Query --> Sparse["Sparse Search (BM25 Lexical)"]
-        Dense --> RRF["Hợp nhất thứ hạng RRF (k=60)"]
+        Dense --> RRF["Hop nhat thu hang RRF (k=60)"]
         Sparse --> RRF
-        RRF --> Candidates["Top-10 ứng viên ban đầu"]
-        Candidates --> Rerank["Tái xếp hạng: BGE Cross-Encoder"]
-        Rerank --> TopK["Top-3 đoạn trích phù hợp nhất"]
-        TopK --> WinExp["Mở rộng cửa sổ lân cận (Chunks i-1, i, i+1)"]
-        WinExp --> FinalContext["Ngữ cảnh hoàn chỉnh đưa vào LLM"]
+        RRF --> Candidates["Top-10 ung vien ban dau"]
+        Candidates --> Rerank["Tai xep hang: BGE Cross-Encoder"]
+        Rerank --> TopK["Top-3 doan trich phu hop nhat"]
+        TopK --> WinExp["Mo rong cua so lan can (i-1, i, i+1)"]
+        WinExp --> FinalContext["Ngu canh hoan chinh dua vao LLM"]
     end
 
-    style Ingestion fill:#fefce8,stroke:#ca8a04,stroke-width:1.5px,color:#713f12
-    style Retrieval fill:#f5f3ff,stroke:#7c3aed,stroke-width:1.5px,color:#4c1d95
+    classDef default fill:#000000,stroke:#ffffff,stroke-width:1.5px,color:#ffffff;
 ```
 
 - **Quy trình nạp tài liệu**:
@@ -159,7 +287,7 @@ flowchart LR
 
 ---
 
-## 4. Thử nghiệm đánh giá hiệu quả (Ablation Study)
+## 6. Thử nghiệm đánh giá hiệu quả (Ablation Study)
 
 Để kiểm tra xem việc kết hợp BM25 và Cross-Encoder có thực sự cải thiện khả năng tìm kiếm so với chỉ dùng Vector đơn thuần hay không, dự án thực hiện đo lường trên bộ câu hỏi thử nghiệm ([`backend/evaluation/dataset.json`](backend/evaluation/dataset.json)) với các dạng truy vấn khác nhau (từ khóa đặc thù, tên riêng, câu hỏi ngữ nghĩa):
 
@@ -177,7 +305,7 @@ flowchart LR
 
 ---
 
-## 5. Các lựa chọn thiết kế kỹ thuật
+## 7. Các lựa chọn thiết kế kỹ thuật
 
 Trong quá trình phát triển, một số giải pháp kỹ thuật đã được cân nhắc để cân đối giữa chi phí, thời gian xử lý và độ chính xác:
 
@@ -196,7 +324,7 @@ Trong quá trình phát triển, một số giải pháp kỹ thuật đã đư�
 
 ---
 
-## 6. Các công cụ của Agent (Multi-Tool Ecosystem)
+## 8. Các công cụ của Agent (Multi-Tool Ecosystem)
 
 Các công cụ được tổ chức tách biệt tại thư mục [`backend/app/tools/`](backend/app/tools/):
 
@@ -207,7 +335,7 @@ Các công cụ được tổ chức tách biệt tại thư mục [`backend/app
 
 ---
 
-## 7. Kết quả kiểm thử tự động (32/32 tests)
+## 9. Kết quả kiểm thử tự động (32/32 tests)
 
 Dự án có sẵn bộ script kiểm thử tự động để kiểm tra các thành phần từ backend API, dịch vụ xử lý tài liệu đến luồng stream SSE:
 
@@ -229,7 +357,7 @@ python backend/auto_tests/run_all_tests.py
 
 ---
 
-## 8. Danh mục REST API
+## 10. Danh mục REST API
 
 | Phương thức | Đường dẫn | Chức năng |
 | :--- | :--- | :--- |
@@ -250,7 +378,7 @@ python backend/auto_tests/run_all_tests.py
 
 ---
 
-## 9. Hướng dẫn cài đặt & khởi chạy
+## 11. Hướng dẫn cài đặt & khởi chạy
 
 ### Yêu cầu môi trường:
 - Python 3.10 trở lên (khuyến nghị 3.12).
@@ -308,7 +436,7 @@ HOST=0.0.0.0
 
 ---
 
-## 10. Triển khai với Docker & Kubernetes
+## 12. Triển khai với Docker & Kubernetes
 
 ### Chạy bằng Docker Compose:
 ```bash
