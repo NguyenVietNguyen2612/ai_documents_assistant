@@ -1,3 +1,4 @@
+import io
 try:
     from pypdf import PdfReader
 except ImportError:
@@ -11,39 +12,35 @@ class DocumentService:
     def __init__(self):
         self.embedding_service = EmbeddingService()
 
-    def extract_pages(self, file: UploadFile) -> list[dict]:
+    def extract_pages_from_bytes(self, file_bytes: bytes, filename: str = "", content_type: str = "") -> list[dict]:
         """
-        Trích xuất văn bản tài liệu theo từng trang để lưu giữ số trang chính xác.
+        Trích xuất văn bản tài liệu theo từng trang từ raw bytes.
         Trả về danh sách: [{"page": 1, "text": "..."}, {"page": 2, "text": "..."}]
         """
         llm = LLMService()
-        file_bytes = file.file.read()
-        file.file.seek(0)
-
-        filename = (file.filename or "").lower()
-        mime_type = (file.content_type or "").lower()
+        fname = (filename or "").lower()
+        mime_type = (content_type or "").lower()
         if not mime_type or mime_type in ("application/octet-stream", "text/plain"):
-            if filename.endswith(".csv"):
+            if fname.endswith(".csv"):
                 mime_type = "text/csv"
-            elif filename.endswith(".md"):
+            elif fname.endswith(".md"):
                 mime_type = "text/markdown"
-            elif filename.endswith(".pdf"):
+            elif fname.endswith(".pdf"):
                 mime_type = "application/pdf"
 
         try:
-            print(f"[DocumentService] Trích xuất nội dung cho file {file.filename} (mime_type: {mime_type})...")
+            print(f"[DocumentService] Trích xuất nội dung cho file {filename} (mime_type: {mime_type})...")
             pages = llm.extract_document_pages(file_bytes=file_bytes, mime_type=mime_type)
             if pages:
-                print(f"[DocumentService] Trích xuất thành công {len(pages)} trang/phần từ {file.filename}!")
+                print(f"[DocumentService] Trích xuất thành công {len(pages)} trang/phần từ {filename}!")
                 return pages
         except Exception as e:
             print(f"[DocumentService] Lỗi khi trích xuất: {e}. Fallback sang pypdf...")
 
-        file.file.seek(0)
         pages_fallback = []
-        if "pdf" in (file.content_type or "").lower() and PdfReader is not None:
+        if (fname.endswith(".pdf") or "pdf" in mime_type) and PdfReader is not None:
             try:
-                reader = PdfReader(file.file)
+                reader = PdfReader(io.BytesIO(file_bytes))
                 for page_idx, page in enumerate(reader.pages, start=1):
                     text = page.extract_text()
                     if text and text.strip():
@@ -52,8 +49,24 @@ class DocumentService:
                 print(f"[DocumentService] Fallback pypdf error: {e}")
 
         if not pages_fallback:
+            # Nếu là file text/markdown/csv thô
+            try:
+                decoded = file_bytes.decode("utf-8", errors="ignore")
+                if decoded.strip():
+                    return [{"page": 1, "text": decoded.strip()}]
+            except Exception:
+                pass
             return [{"page": 1, "text": ""}]
         return pages_fallback
+
+    def extract_pages(self, file: UploadFile) -> list[dict]:
+        """
+        Trích xuất văn bản tài liệu theo từng trang để lưu giữ số trang chính xác.
+        """
+        file.file.seek(0)
+        file_bytes = file.file.read()
+        file.file.seek(0)
+        return self.extract_pages_from_bytes(file_bytes, file.filename or "", file.content_type or "")
 
     def extract_text(self, file: UploadFile) -> str:
         pages = self.extract_pages(file)
@@ -118,9 +131,8 @@ class DocumentService:
 
         return all_chunks
     
-    def process_document(self, file: UploadFile):
-        file.file.seek(0)
-        pages = self.extract_pages(file)
+    def process_file_data(self, file_bytes: bytes, filename: str = "", content_type: str = ""):
+        pages = self.extract_pages_from_bytes(file_bytes, filename, content_type)
         chunk_items = self.chunk_pages(pages)
 
         if not chunk_items:
@@ -137,3 +149,9 @@ class DocumentService:
             "pages": pages_list,
             "embeddings": embeddings,
         }
+
+    def process_document(self, file: UploadFile):
+        file.file.seek(0)
+        file_bytes = file.file.read()
+        file.file.seek(0)
+        return self.process_file_data(file_bytes, file.filename or "", file.content_type or "")

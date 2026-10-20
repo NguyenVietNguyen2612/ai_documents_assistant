@@ -31,7 +31,8 @@ async def chat(request: ChatRequest):
         request.question,
         request.history,
         session_id=request.session_id or "default",
-        checkpoint_id=request.checkpoint_id
+        checkpoint_id=request.checkpoint_id,
+        document_filter=request.document_filter,
     )
     return ChatResponse(
         question=request.question,
@@ -51,7 +52,8 @@ async def chat_stream(request: ChatRequest):
             history=request.history,
             session_id=request.session_id or "default",
             checkpoint_id=request.checkpoint_id,
-            rollback_from_message_id=request.rollback_from_message_id
+            rollback_from_message_id=request.rollback_from_message_id,
+            document_filter=request.document_filter,
         ),
         media_type="text/event-stream",
         headers={

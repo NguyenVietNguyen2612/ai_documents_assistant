@@ -1,5 +1,5 @@
 from pathlib import Path
-from fastapi import APIRouter, UploadFile, File, HTTPException
+from fastapi import APIRouter, UploadFile, File, HTTPException, BackgroundTasks
 from fastapi.responses import FileResponse
 from app.services.document_service import DocumentService
 from app.services.vector_store import VectorStore
@@ -20,10 +20,65 @@ vector_store.create_index()
 vector_store.load_collection()
 
 
+def process_document_background(doc_id: str, filename: str, saved_file_path: Path, ext: str):
+    """Xử lý Ingestion ngầm (Async Background Task): OCR/Text Extraction, Structural Chunking, Embedding và Indexing."""
+    try:
+        print(f"[Async Ingestion] Bắt đầu xử lý ngầm cho tài liệu: '{filename}' (ID: {doc_id})...")
+        file_bytes = saved_file_path.read_bytes()
+        processed = document_service.process_file_data(file_bytes, filename)
+        
+        data_to_insert = []
+        chunk_pages = processed.get("pages", [1] * len(processed["chunks"]))
+        for i, (chunk, embedding, page_num) in enumerate(zip(processed["chunks"], processed["embeddings"], chunk_pages)):
+            data_to_insert.append({
+                "id": f"{doc_id}_{i}",
+                "vector": embedding,
+                "text": chunk,
+                "document_id": doc_id,
+                "document_name": filename,
+                "page": int(page_num),  # Số trang thực tế của tài liệu
+                "chunk_index": i,
+            })
+            
+        if data_to_insert:
+            if not vector_store.client.has_collection(vector_store.collection_name):
+                vector_store.create_collection(384)
+                vector_store.create_index()
+                vector_store.load_collection()
+                
+            vector_store.insert(data_to_insert)
+            print(f"[Async Ingestion] Đã chèn {len(data_to_insert)} chunks vào Milvus Vector DB.")
+
+            # Thêm các chunk vào chỉ mục BM25
+            bm25_service.add_documents(data_to_insert)
+            print(f"[Async Ingestion] Đã cập nhật chỉ mục BM25 cho '{filename}'.")
+
+        db_service.update_document_status(doc_id, status="ready", chunk_count=len(data_to_insert))
+        print(f"[Async Ingestion] Hoàn tất xử lý ngầm tài liệu '{filename}' (ID: {doc_id}) với {len(data_to_insert)} chunks -> Trạng thái: READY ✅")
+    except Exception as e:
+        print(f"[Async Ingestion] Lỗi khi xử lý ngầm tài liệu '{filename}': {e} ❌")
+        db_service.update_document_status(doc_id, status="error", error_message=str(e))
+
+
 @router.get("/documents")
 def get_documents():
-    # Lấy dữ liệu trực tiếp từ SQLite Database thay vì JSON
+    # Lấy dữ liệu trực tiếp từ SQLite Database kèm status và chunk_count
     return db_service.get_all_documents()
+
+
+@router.get("/documents/{document_id}/status")
+def get_document_status(document_id: str):
+    """Endpoint truy vấn trạng thái tiến trình xử lý tài liệu (processing / ready / error)."""
+    doc = db_service.get_document(document_id)
+    if not doc:
+        raise HTTPException(status_code=404, detail="File tài liệu không tồn tại trên hệ thống")
+    return {
+        "id": doc["id"],
+        "name": doc["name"],
+        "status": doc.get("status", "ready"),
+        "chunk_count": doc.get("chunk_count", 0),
+        "error_message": doc.get("error_message"),
+    }
 
 
 @router.get("/documents/{document_id}/file")
@@ -55,6 +110,7 @@ def get_document_file(document_id: str, download: bool = False):
 
 @router.post("/documents/upload")
 async def upload_document(
+    background_tasks: BackgroundTasks,
     file: UploadFile = File(...)
 ):
     ext = Path(file.filename or "").suffix.lower()
@@ -76,43 +132,18 @@ async def upload_document(
     file_size = len(file_bytes)
     size_mb = f"{round(file_size / 1024 / 1024, 2)} MB" if file_size else "Unknown"
     
-    # 2. Lưu metadata vào SQLite
-    db_service.insert_document(doc_id, file.filename, size_mb)
+    # 2. Lưu metadata vào SQLite với status='processing'
+    db_service.insert_document(doc_id, file.filename, size_mb, status="processing", chunk_count=0)
 
-    # 3. Trích xuất tài liệu theo từng trang chính xác
-    processed = document_service.process_document(file)
-    
-    data_to_insert = []
-    chunk_pages = processed.get("pages", [1] * len(processed["chunks"]))
-    for i, (chunk, embedding, page_num) in enumerate(zip(processed["chunks"], processed["embeddings"], chunk_pages)):
-        data_to_insert.append({
-            "id": f"{doc_id}_{i}",
-            "vector": embedding,
-            "text": chunk,
-            "document_id": doc_id,
-            "document_name": file.filename,
-            "page": int(page_num),  # Số trang thực tế của tài liệu!
-            "chunk_index": i,
-        })
-        
-    if data_to_insert:
-        # Kiểm tra và tạo lại collection nếu nó bị xóa trong lúc server đang chạy
-        if not vector_store.client.has_collection(vector_store.collection_name):
-            vector_store.create_collection(384)
-            vector_store.create_index()
-            vector_store.load_collection()
-            
-        vector_store.insert(data_to_insert)
-        print(f"Inserted {len(data_to_insert)} chunks (with real page numbers) for {file.filename} into Vector DB.")
-
-        # Thêm các chunk vào chỉ mục BM25
-        bm25_service.add_documents(data_to_insert)
+    # 3. Đưa vào BackgroundTasks để trích xuất OCR, chunking và embedding bất đồng bộ
+    background_tasks.add_task(process_document_background, doc_id, file.filename, saved_file_path, ext)
 
     return {
-        "message": "File processed and uploaded successfully with page-aware chunking",
+        "message": "File đã được tải lên thành công và đang được xử lý ngầm (Async Background Ingestion)",
         "document_id": doc_id,
         "filename": file.filename,
-        "total_chunks": len(data_to_insert),
+        "status": "processing",
+        "size": size_mb,
     }
 
 

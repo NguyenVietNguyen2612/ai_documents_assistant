@@ -7,6 +7,7 @@ class ChatRequest(BaseModel):
     session_id: Optional[str] = "default"
     checkpoint_id: Optional[str] = None
     rollback_from_message_id: Optional[str] = None
+    document_filter: Optional[str] = None
 
 class ChatResponse(BaseModel):
     question: str

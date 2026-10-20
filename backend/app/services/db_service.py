@@ -24,9 +24,22 @@ class DBService:
                     id TEXT PRIMARY KEY,
                     name TEXT NOT NULL,
                     size TEXT NOT NULL,
+                    status TEXT DEFAULT 'ready',
+                    chunk_count INTEGER DEFAULT 0,
+                    error_message TEXT,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
             """)
+            # Tự động di trú cột (Schema Migration) cho các DB SQLite đã tồn tại
+            cursor.execute("PRAGMA table_info(documents)")
+            columns = [col["name"] if isinstance(col, sqlite3.Row) else col[1] for col in cursor.fetchall()]
+            if "status" not in columns:
+                cursor.execute("ALTER TABLE documents ADD COLUMN status TEXT DEFAULT 'ready'")
+            if "chunk_count" not in columns:
+                cursor.execute("ALTER TABLE documents ADD COLUMN chunk_count INTEGER DEFAULT 0")
+            if "error_message" not in columns:
+                cursor.execute("ALTER TABLE documents ADD COLUMN error_message TEXT")
+
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS chat_sessions (
                     id TEXT PRIMARY KEY,
@@ -53,16 +66,48 @@ class DBService:
     def get_all_documents(self):
         with self._get_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute("SELECT id, name, size FROM documents ORDER BY created_at DESC")
+            cursor.execute("SELECT id, name, size, status, chunk_count, error_message, created_at FROM documents ORDER BY created_at DESC")
             return [dict(row) for row in cursor.fetchall()]
 
-    def insert_document(self, doc_id: str, name: str, size: str):
+    def get_document(self, doc_id: str):
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT id, name, size, status, chunk_count, error_message, created_at FROM documents WHERE id = ?", (doc_id,))
+            row = cursor.fetchone()
+            return dict(row) if row else None
+
+    def insert_document(self, doc_id: str, name: str, size: str, status: str = "ready", chunk_count: int = 0, error_message: str = None):
         with self._get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute(
-                "INSERT INTO documents (id, name, size) VALUES (?, ?, ?)",
-                (doc_id, name, size)
+                "INSERT INTO documents (id, name, size, status, chunk_count, error_message) VALUES (?, ?, ?, ?, ?, ?)",
+                (doc_id, name, size, status, chunk_count, error_message)
             )
+            conn.commit()
+
+    def update_document_status(self, doc_id: str, status: str, chunk_count: int = None, error_message: str = None):
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            if chunk_count is not None and error_message is not None:
+                cursor.execute(
+                    "UPDATE documents SET status = ?, chunk_count = ?, error_message = ? WHERE id = ?",
+                    (status, chunk_count, error_message, doc_id)
+                )
+            elif chunk_count is not None:
+                cursor.execute(
+                    "UPDATE documents SET status = ?, chunk_count = ? WHERE id = ?",
+                    (status, chunk_count, doc_id)
+                )
+            elif error_message is not None:
+                cursor.execute(
+                    "UPDATE documents SET status = ?, error_message = ? WHERE id = ?",
+                    (status, error_message, doc_id)
+                )
+            else:
+                cursor.execute(
+                    "UPDATE documents SET status = ? WHERE id = ?",
+                    (status, doc_id)
+                )
             conn.commit()
 
     def delete_document(self, doc_id: str):

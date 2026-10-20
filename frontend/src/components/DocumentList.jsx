@@ -8,6 +8,9 @@ import {
     FolderOpen,
     AlertTriangle,
     X,
+    Loader2,
+    Layers,
+    AlertCircle,
 } from "lucide-react"
 
 function DocumentList({ refreshKey, onPreviewDocument, activePreviewDocId }) {
@@ -30,6 +33,25 @@ function DocumentList({ refreshKey, onPreviewDocument, activePreviewDocId }) {
     useEffect(() => {
         fetchDocuments()
     }, [refreshKey])
+
+    // Polling tự động khi có ít nhất 1 tài liệu đang xử lý ngầm (Async Background Ingestion)
+    useEffect(() => {
+        const hasProcessing = documents.some((doc) => doc.status === "processing")
+        if (!hasProcessing) return
+
+        const interval = setInterval(() => {
+            fetch("http://localhost:8001/documents")
+                .then((res) => res.json())
+                .then((data) => {
+                    if (Array.isArray(data)) {
+                        setDocuments(data)
+                    }
+                })
+                .catch((err) => console.error("Poll documents error:", err))
+        }, 2000)
+
+        return () => clearInterval(interval)
+    }, [documents])
 
     const handleDeleteClick = (document, e) => {
         if (e) e.stopPropagation()
@@ -71,6 +93,32 @@ function DocumentList({ refreshKey, onPreviewDocument, activePreviewDocId }) {
         return { icon: <FileText size={15} />, extLabel: "PDF", typeClass: "doc-pdf" }
     }
 
+    const renderStatusBadge = (doc) => {
+        const status = doc.status || "ready"
+        if (status === "processing") {
+            return (
+                <span className="doc-status-chip processing" title="Hệ thống đang trích xuất OCR, chia đoạn cấu trúc và nhúng vector ngầm...">
+                    <Loader2 size={11} className="spin-icon" />
+                    <span>Đang xử lý</span>
+                </span>
+            )
+        }
+        if (status === "error") {
+            return (
+                <span className="doc-status-chip error" title={doc.error_message || "Gặp sự cố khi trích xuất hoặc lập chỉ mục"}>
+                    <AlertCircle size={11} />
+                    <span>Lỗi</span>
+                </span>
+            )
+        }
+        return (
+            <span className="doc-status-chip ready" title={`${doc.chunk_count || 0} phân đoạn đã lập chỉ mục Hybrid Search`}>
+                <Layers size={11} />
+                <span>{doc.chunk_count || 0} chunks</span>
+            </span>
+        )
+    }
+
     return (
         <div className="documents">
             <div className="section-header">
@@ -88,20 +136,22 @@ function DocumentList({ refreshKey, onPreviewDocument, activePreviewDocId }) {
                     documents.map((document) => {
                         const meta = getDocBadgeMeta(document.name)
                         const isBeingPreviewed = activePreviewDocId && activePreviewDocId === document.id
+                        const isProcessing = document.status === "processing"
                         return (
                             <div
-                                className={`document-item ${isBeingPreviewed ? "active-preview" : ""}`}
+                                className={`document-item ${isBeingPreviewed ? "active-preview" : ""} ${isProcessing ? "doc-processing" : ""}`}
                                 key={document.id}
                                 role="listitem"
-                                onClick={() =>
+                                onClick={() => {
+                                    if (isProcessing) return
                                     onPreviewDocument &&
-                                    onPreviewDocument({
-                                        documentId: document.id,
-                                        documentName: document.name,
-                                        page: 1,
-                                    })
-                                }
-                                title={`Nhấn để xem trực tiếp "${document.name}"`}
+                                        onPreviewDocument({
+                                            documentId: document.id,
+                                            documentName: document.name,
+                                            page: 1,
+                                        })
+                                }}
+                                title={isProcessing ? "Tài liệu đang được trích xuất ngữ cảnh ngầm..." : `Nhấn để xem trực tiếp "${document.name}"`}
                             >
                                 <div className={`document-icon ${meta.typeClass}`} aria-hidden="true">
                                     {meta.icon}
@@ -112,6 +162,7 @@ function DocumentList({ refreshKey, onPreviewDocument, activePreviewDocId }) {
                                     <div className="document-meta-row">
                                         <span className="document-ext-tag">{meta.extLabel}</span>
                                         <span className="document-size">{document.size}</span>
+                                        {renderStatusBadge(document)}
                                     </div>
                                 </div>
 
@@ -119,6 +170,7 @@ function DocumentList({ refreshKey, onPreviewDocument, activePreviewDocId }) {
                                     <button
                                         type="button"
                                         className="doc-action-btn preview-btn"
+                                        disabled={isProcessing}
                                         onClick={(e) => {
                                             e.stopPropagation()
                                             onPreviewDocument &&
@@ -128,7 +180,7 @@ function DocumentList({ refreshKey, onPreviewDocument, activePreviewDocId }) {
                                                     page: 1,
                                                 })
                                         }}
-                                        title="Xem tài liệu"
+                                        title={isProcessing ? "Đang xử lý tài liệu..." : "Xem tài liệu"}
                                         aria-label={`Xem tài liệu ${document.name}`}
                                     >
                                         <Eye size={14} />

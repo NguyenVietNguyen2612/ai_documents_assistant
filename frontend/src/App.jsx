@@ -117,6 +117,7 @@ function App() {
             onRefreshSessions={loadSessions}
             onOpenCitation={handleOpenDocPreview}
             onUploadSuccess={triggerRefreshDocs}
+            refreshDocsKey={refreshDocsKey}
             sidebarOpen={sidebarOpen}
             onToggleSidebar={() => setSidebarOpen((p) => !p)}
             theme={theme}

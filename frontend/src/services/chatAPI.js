@@ -1,6 +1,6 @@
 const API_BASE_URL = "http://localhost:8001";
 
-export async function sendMessage(question, history = [], sessionId = "default", checkpointId = null) {
+export async function sendMessage(question, history = [], sessionId = "default", checkpointId = null, documentFilter = null) {
     const response = await fetch(`${API_BASE_URL}/chat`, {
         method: "POST",
         headers: {
@@ -11,6 +11,7 @@ export async function sendMessage(question, history = [], sessionId = "default",
             history: history,
             session_id: sessionId,
             checkpoint_id: checkpointId,
+            document_filter: documentFilter,
         }),
     });
 
@@ -27,6 +28,7 @@ export async function sendMessageStream({
     sessionId = "default",
     checkpointId = null,
     rollbackFromMessageId = null,
+    documentFilter = null,
     onEvent,
     onError,
     onComplete
@@ -43,6 +45,7 @@ export async function sendMessageStream({
                 session_id: sessionId,
                 checkpoint_id: checkpointId,
                 rollback_from_message_id: rollbackFromMessageId,
+                document_filter: documentFilter,
             }),
         });
 

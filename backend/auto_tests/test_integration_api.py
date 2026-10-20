@@ -42,7 +42,7 @@ def test_chat_sessions_api():
 
 
 def test_document_upload_rejects_unsupported_extensions():
-    print("\n[API TEST 4/4] Kiểm tra Endpoint POST /documents/upload chặn file độc hại/sai định dạng...")
+    print("\n[API TEST 4/5] Kiểm tra Endpoint POST /documents/upload chặn file độc hại/sai định dạng...")
     # Thử upload 1 file .exe
     fake_exe = ("malicious.exe", b"MZ\x90\x00\x03\x00\x00\x00", "application/x-msdownload")
     response = client.post("/documents/upload", files={"file": fake_exe})
@@ -53,6 +53,31 @@ def test_document_upload_rejects_unsupported_extensions():
     print("  -> Kết quả: ✅ PASSED (Hệ thống từ chối chính xác file không thuộc định dạng được hỗ trợ).")
 
 
+def test_async_background_upload_and_status():
+    print("\n[API TEST 5/5] Kiểm tra Async Background Ingestion & Endpoint GET /documents/{id}/status...")
+    # Tải lên file text mẫu
+    sample_content = b"# Document Sample\nThis is a sample text file to verify async background ingestion."
+    sample_file = ("sample_async_test.txt", sample_content, "text/plain")
+    response = client.post("/documents/upload", files={"file": sample_file})
+    print(f"  -> Upload response: Status={response.status_code} | Body={response.json()}")
+    assert response.status_code == 200
+    res_data = response.json()
+    assert "document_id" in res_data
+    assert res_data.get("status") in ["processing", "ready"]
+    doc_id = res_data["document_id"]
+
+    # Kiểm tra endpoint status
+    status_resp = client.get(f"/documents/{doc_id}/status")
+    print(f"  -> Query status: Status={status_resp.status_code} | Body={status_resp.json()}")
+    assert status_resp.status_code == 200
+    assert status_resp.json()["id"] == doc_id
+    assert status_resp.json()["status"] in ["processing", "ready"]
+
+    # Dọn dẹp tài liệu test
+    client.delete(f"/documents/{doc_id}")
+    print("  -> Kết quả: ✅ PASSED (Async background task và status tracking hoạt động hoàn hảo).")
+
+
 if __name__ == "__main__":
     print("=" * 70)
     print("  BẮT ĐẦU CHẠY KIỂM THỬ TÍCH HỢP: test_integration_api.py")
@@ -61,6 +86,7 @@ if __name__ == "__main__":
     test_documents_list_api()
     test_chat_sessions_api()
     test_document_upload_rejects_unsupported_extensions()
+    test_async_background_upload_and_status()
     print("\n" + "=" * 70)
-    print("  TỔNG KẾT: TẤT CẢ 4 BÀI KIỂM THỬ INTEGRATION API ĐÃ VƯỢT QUA! ✅")
+    print("  TỔNG KẾT: TẤT CẢ 5 BÀI KIỂM THỬ INTEGRATION API ĐÃ VƯỢT QUA! ✅")
     print("=" * 70)

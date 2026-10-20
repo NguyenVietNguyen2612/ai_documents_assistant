@@ -22,6 +22,7 @@ import {
     Calculator,
     ListFilter,
     Loader2,
+    AtSign,
 } from "lucide-react"
 import { sendMessageStream, getSessionMessages } from "../services/chatAPI"
 import MarkdownViewer from "./MarkdownViewer"
@@ -73,6 +74,7 @@ function ChatBox({
     onRefreshSessions,
     onOpenCitation,
     onUploadSuccess,
+    refreshDocsKey = 0,
     sidebarOpen = true,
     onToggleSidebar,
 }) {
@@ -84,9 +86,29 @@ function ChatBox({
     const [copiedMsgId, setCopiedMsgId] = useState(null)
     const [quickUploading, setQuickUploading] = useState(false)
 
+    // State phục vụ @tài_liệu (Scoped Retrieval)
+    const [availableDocs, setAvailableDocs] = useState([])
+    const [selectedScopeDoc, setSelectedScopeDoc] = useState(null)
+    const [showDocPicker, setShowDocPicker] = useState(false)
+
     const messagesEndRef = useRef(null)
     const textareaRef = useRef(null)
     const quickFileInputRef = useRef(null)
+
+    const fetchAvailableDocs = () => {
+        fetch("http://localhost:8001/documents")
+            .then((res) => res.json())
+            .then((data) => {
+                if (Array.isArray(data)) {
+                    setAvailableDocs(data)
+                }
+            })
+            .catch((err) => console.error("Failed to load documents for scope selector:", err))
+    }
+
+    useEffect(() => {
+        fetchAvailableDocs()
+    }, [refreshDocsKey])
 
     const scrollToBottom = () => {
         messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
@@ -191,11 +213,14 @@ function ChatBox({
                 method: "POST",
                 body: formData,
             })
-            if (res.ok) {
+            const resData = await res.json()
+            if (res.ok && !resData.error) {
                 if (onUploadSuccess) onUploadSuccess()
+                setSelectedScopeDoc({ id: resData.document_id, name: selectedFile.name })
+                fetchAvailableDocs()
                 setQuestion((prev) =>
                     prev
-                        ? `${prev} (Tài liệu: ${selectedFile.name})`
+                        ? prev
                         : `Hãy tóm tắt nội dung chính của tài liệu ${selectedFile.name} vừa tải lên.`
                 )
                 textareaRef.current?.focus()
@@ -291,6 +316,7 @@ function ChatBox({
             sessionId: sessionId,
             checkpointId: targetCheckpointId,
             rollbackFromMessageId: targetMessageId,
+            documentFilter: selectedScopeDoc ? selectedScopeDoc.name : null,
             onEvent: (event) => {
                 const nowTime = new Date().toLocaleTimeString([], {
                     hour: "2-digit",
@@ -943,6 +969,73 @@ function ChatBox({
 
             {/* Ô nhập tin nhắn */}
             <div className="chat-input-wrapper">
+                {/* Popover chọn tài liệu @tài_liệu */}
+                {showDocPicker && (
+                    <div className="doc-scope-picker-popover" role="dialog" aria-label="Chọn tài liệu khoanh vùng">
+                        <div className="doc-scope-picker-header">
+                            <div className="doc-scope-title-wrap">
+                                <AtSign size={13} />
+                                <span>Khoanh vùng truy vấn (@tài_liệu)</span>
+                            </div>
+                            <button
+                                type="button"
+                                className="doc-scope-picker-close"
+                                onClick={() => setShowDocPicker(false)}
+                            >
+                                <X size={13} />
+                            </button>
+                        </div>
+                        <div className="doc-scope-picker-list">
+                            {availableDocs.length === 0 ? (
+                                <div className="doc-scope-empty">Chưa có tài liệu nào trong hệ thống</div>
+                            ) : (
+                                availableDocs.map((doc) => {
+                                    const isSelected = selectedScopeDoc?.id === doc.id
+                                    return (
+                                        <button
+                                            key={doc.id}
+                                            type="button"
+                                            className={`doc-scope-item ${isSelected ? "selected" : ""}`}
+                                            onClick={() => {
+                                                setSelectedScopeDoc(isSelected ? null : doc)
+                                                setShowDocPicker(false)
+                                                textareaRef.current?.focus()
+                                            }}
+                                        >
+                                            <FileText size={14} className="doc-scope-item-icon" />
+                                            <div className="doc-scope-item-info">
+                                                <span className="doc-scope-item-name">{doc.name}</span>
+                                                <span className="doc-scope-item-meta">
+                                                    {doc.chunk_count || 0} chunks • {doc.size}
+                                                </span>
+                                            </div>
+                                            {isSelected && <Check size={14} className="doc-scope-check" />}
+                                        </button>
+                                    )
+                                })
+                            )}
+                        </div>
+                    </div>
+                )}
+
+                {/* Huy hiệu tài liệu đang được khoanh vùng */}
+                {selectedScopeDoc && (
+                    <div className="scoped-doc-pill">
+                        <span className="scoped-pill-label">
+                            <FileText size={13} />
+                            <span>Khoanh vùng tra cứu: <strong>{selectedScopeDoc.name}</strong></span>
+                        </span>
+                        <button
+                            type="button"
+                            className="scoped-pill-clear"
+                            onClick={() => setSelectedScopeDoc(null)}
+                            title="Bỏ khoanh vùng tài liệu"
+                        >
+                            <X size={13} />
+                        </button>
+                    </div>
+                )}
+
                 <div className="chat-input-box">
                     <input
                         ref={quickFileInputRef}
@@ -966,15 +1059,38 @@ function ChatBox({
                         )}
                     </button>
 
+                    <button
+                        type="button"
+                        className={`attach-button scope-button ${selectedScopeDoc ? "active" : ""}`}
+                        onClick={() => {
+                            fetchAvailableDocs()
+                            setShowDocPicker((prev) => !prev)
+                        }}
+                        disabled={loading}
+                        title={selectedScopeDoc ? `Đang khoanh vùng "${selectedScopeDoc.name}" - Nhấp để đổi` : "Khoanh vùng tài liệu mục tiêu (@)"}
+                        aria-label="Khoanh vùng tài liệu"
+                    >
+                        <AtSign size={17} />
+                    </button>
+
                     <textarea
                         ref={textareaRef}
                         value={question}
-                        onChange={(event) => setQuestion(event.target.value)}
+                        onChange={(event) => {
+                            const val = event.target.value
+                            setQuestion(val)
+                            if (val.endsWith("@")) {
+                                fetchAvailableDocs()
+                                setShowDocPicker(true)
+                            }
+                        }}
                         onKeyDown={handleKeyDown}
                         placeholder={
                             rollbackState
                                 ? "Chỉnh sửa câu hỏi để rẽ nhánh hội thoại mới..."
-                                : "Đặt câu hỏi về tài liệu của bạn (Nhấn Enter để gửi, Shift+Enter xuống dòng)..."
+                                : selectedScopeDoc
+                                ? `Đặt câu hỏi tập trung vào "${selectedScopeDoc.name}"...`
+                                : "Đặt câu hỏi về tài liệu (Gõ @ hoặc nhấp icon @ để chọn file, Shift+Enter xuống dòng)..."
                         }
                         rows={1}
                     />

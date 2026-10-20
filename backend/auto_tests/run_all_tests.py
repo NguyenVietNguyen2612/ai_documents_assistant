@@ -111,6 +111,7 @@ def main():
                 "test_documents_list_api",
                 "test_chat_sessions_api",
                 "test_document_upload_rejects_unsupported_extensions",
+                "test_async_background_upload_and_status",
             ],
             "FastAPI REST Endpoints Integration",
         ),

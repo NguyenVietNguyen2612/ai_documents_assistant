@@ -65,7 +65,8 @@ QUY TẮC ĐỊNH DẠNG VĂN BẢN (MARKDOWN CHUẨN):
         question: str,
         history: list = None,
         session_id: str = "default",
-        checkpoint_id: Optional[str] = None
+        checkpoint_id: Optional[str] = None,
+        document_filter: Optional[str] = None,
     ) -> dict:
         import time
         import re
@@ -82,13 +83,23 @@ QUY TẮC ĐỊNH DẠNG VĂN BẢN (MARKDOWN CHUẨN):
         existing_msgs = state.values.get("messages", []) if state else []
         prior_len = len(existing_msgs)
 
+        target_doc = document_filter
+        if not target_doc:
+            at_match = re.search(r'@([a-zA-Z0-9_\-\.\s]+?\.(?:pdf|csv|md|txt))', question, re.IGNORECASE)
+            if at_match:
+                target_doc = at_match.group(1).strip()
+
+        effective_prompt = question
+        if target_doc:
+            effective_prompt += f"\n\n[LƯU Ý PHẠM VI TÀI LIỆU]: Người dùng chỉ định tập trung phân tích tài liệu '{target_doc}'. Bạn hãy ưu tiên truyền tham số document_name='{target_doc}' khi kích hoạt công cụ tra cứu."
+
         if not existing_msgs:
             messages = [
                 SystemMessage(content=self.SYSTEM_PROMPT),
-                HumanMessage(content=question)
+                HumanMessage(content=effective_prompt)
             ]
         else:
-            messages = [HumanMessage(content=question)]
+            messages = [HumanMessage(content=effective_prompt)]
 
         result = await graph.ainvoke({"messages": messages}, config=config)
         all_msgs = result.get("messages", [])
@@ -133,7 +144,8 @@ QUY TẮC ĐỊNH DẠNG VĂN BẢN (MARKDOWN CHUẨN):
         history: list = None,
         session_id: str = "default",
         checkpoint_id: Optional[str] = None,
-        rollback_from_message_id: Optional[str] = None
+        rollback_from_message_id: Optional[str] = None,
+        document_filter: Optional[str] = None,
     ) -> AsyncGenerator[str, None]:
         import re
         graph = await self._get_graph()
@@ -152,6 +164,17 @@ QUY TẮC ĐỊNH DẠNG VĂN BẢN (MARKDOWN CHUẨN):
             content=question
         )
 
+        # Nhận diện tài liệu mục tiêu (Scoped Retrieval / Mention)
+        target_doc = document_filter
+        if not target_doc:
+            at_match = re.search(r'@([a-zA-Z0-9_\-\.\s]+?\.(?:pdf|csv|md|txt))', question, re.IGNORECASE)
+            if at_match:
+                target_doc = at_match.group(1).strip()
+
+        effective_prompt = question
+        if target_doc:
+            effective_prompt += f"\n\n[LƯU Ý PHẠM VI TÀI LIỆU]: Người dùng chỉ định tập trung phân tích tài liệu '{target_doc}'. Bạn hãy ưu tiên truyền tham số document_name='{target_doc}' khi kích hoạt công cụ tra cứu."
+
         # Cấu hình thread và checkpoint cho LangGraph
         config = {"configurable": {"thread_id": session_id}}
         if checkpoint_id:
@@ -165,12 +188,12 @@ QUY TẮC ĐỊNH DẠNG VĂN BẢN (MARKDOWN CHUẨN):
             initial_input = {
                 "messages": [
                     SystemMessage(content=self.SYSTEM_PROMPT),
-                    HumanMessage(content=question)
+                    HumanMessage(content=effective_prompt)
                 ]
             }
         else:
             initial_input = {
-                "messages": [HumanMessage(content=question)]
+                "messages": [HumanMessage(content=effective_prompt)]
             }
 
         # Lưu trữ danh sách suy luận để lưu vào DB
@@ -185,10 +208,11 @@ QUY TẮC ĐỊNH DẠNG VĂN BẢN (MARKDOWN CHUẨN):
 
         # 1. Tiếp nhận câu hỏi
         short_q = (question[:60] + "...") if len(question) > 60 else question
+        status_suffix = f" (Tập trung tài liệu: {target_doc})" if target_doc else ""
         receive_thought = {
             "type": "thought",
             "step": "receive",
-            "content": f'Tiếp nhận câu hỏi: "{short_q}". Bắt đầu phân tích ý định người dùng...'
+            "content": f'Tiếp nhận câu hỏi: "{short_q}"{status_suffix}. Bắt đầu phân tích ý định người dùng...'
         }
         thoughts_history.append(receive_thought)
         yield f"data: {json.dumps(receive_thought, ensure_ascii=False)}\n\n"
