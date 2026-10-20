@@ -109,31 +109,27 @@ Hệ thống sử dụng thư viện LangGraph để quản lý luồng hội th
 
 ### 3.1 Sơ đồ kiến trúc Agent
 
-```mermaid
-%%{init: {
-  'theme': 'base',
-  'themeVariables': {
-    'background': '#000000',
-    'primaryColor': '#000000',
-    'primaryTextColor': '#ffffff',
-    'primaryBorderColor': '#ffffff',
-    'lineColor': '#ffffff',
-    'textColor': '#ffffff',
-    'edgeLabelBackground': '#000000',
-    'clusterBkg': '#000000',
-    'clusterBorder': '#ffffff'
-  }
-}}%%
-flowchart TD
-    Start(["START"]) --> AgentNode["agent_node (LLM)"]
-    AgentNode --> ToolsCond{"tools_condition"}
-    
-    ToolsCond -- "Co yeu cau goi tool (Toi da 3 lan)" --> ToolNode["tool_node (Thuc thi tool)"]
-    ToolNode --> AgentNode
-    
-    ToolsCond -- "Khong goi tool hoac dat gioi han" --> EndNode(["END"])
-
-    classDef default fill:#000000,stroke:#ffffff,stroke-width:1.5px,color:#ffffff;
+```text
+               [ START ]
+                   |
+                   v
+       +-----------------------+
+       |      agent_node       | <-------------------+
+       |         (LLM)         |                     |
+       +-----------------------+                     |
+                   |                                 |
+                   v                                 |
+         { tools_condition }                         |
+         /                 \                         |
+(Có gọi công cụ)     (Không gọi công cụ              |
+       /              hoặc đạt tối đa 3 lần)         |
+      v                       \                      |
++-------------------+          v                     |
+|     tool_node     |       [ END ]                  |
+|  (Thực thi tool)  |                                |
++-------------------+                                |
+      |                                              |
+      +----------------------------------------------+
 ```
 
 Mô tả các thành phần và cạnh (edge) trong đồ thị:
@@ -172,59 +168,43 @@ Trạng thái của Agent được định nghĩa thông qua kiểu dữ liệu 
 Luồng điều phối hội thoại kết hợp giữa lớp phân loại nhanh và đồ thị trạng thái LangGraph:
 
 ```mermaid
-%%{init: {
-  'theme': 'base',
-  'themeVariables': {
-    'background': '#000000',
-    'primaryColor': '#000000',
-    'primaryTextColor': '#ffffff',
-    'primaryBorderColor': '#ffffff',
-    'lineColor': '#ffffff',
-    'textColor': '#ffffff',
-    'edgeLabelBackground': '#000000',
-    'clusterBkg': '#000000',
-    'clusterBorder': '#ffffff'
-  }
-}}%%
 flowchart TD
-    User["Nguoi dung / Giao dien React"] --> API["FastAPI Server (/chat/stream)"]
+    User["Người dùng / Giao diện React"] --> API["FastAPI Server (/chat/stream)"]
 
-    subgraph System1 ["Lop Dinh Tuyen Nhanh (System 1)"]
-        API --> S1_Router{"Bo phan loai Laya / Heuristic"}
-        S1_Router -- "Chao hoi / Xa giao" --> S1_Direct["Tra loi truc tiep"]
-        S1_Router -- "Yeu cau tra cuu / Phan tich" --> S1_Cache{"Kiem tra Semantic Cache (Milvus)"}
-        S1_Cache -- "Khop ngu nghia (>= 0.95)" --> S1_CacheHit["Tra ket qua tu Cache"]
+    subgraph System1 ["System 1: Lớp định tuyến nhanh"]
+        API --> S1_Router{"Bộ phân loại Laya / Heuristic"}
+        S1_Router -- "Chào hỏi / Xã giao" --> S1_Direct["Trả lời trực tiếp (<1ms)"]
+        S1_Router -- "Yêu cầu tra cứu" --> S1_Cache{"Kiểm tra Semantic Cache"}
+        S1_Cache -- "Khớp ngữ nghĩa (≥ 0.95)" --> S1_CacheHit["Phản hồi từ Cache (<50ms)"]
     end
 
-    subgraph System2 ["Do Thi Suy Luan ReAct (System 2)"]
-        S1_Cache -- "Chua co trong Cache" --> AgentNode["agent_node (LLM)"]
+    subgraph System2 ["System 2: Đồ thị suy luận LangGraph"]
+        S1_Cache -- "Chưa có trong Cache" --> AgentNode["agent_node (LLM)"]
         
-        AgentNode --> ToolCond{"tools_condition (Toi da 3 luot)"}
+        AgentNode --> ToolCond{"tools_condition"}
         
-        ToolCond -- "Can goi cong cu" --> ToolNode["tool_node"]
+        ToolCond -- "Gọi công cụ" --> ToolNode["tool_node"]
         
-        subgraph ToolsCatalog ["Danh muc cong cu (backend/app/tools/)"]
+        subgraph ToolsCatalog ["Danh mục công cụ"]
             ToolNode --> T1["retrieve_documents"]
             ToolNode --> T2["list_uploaded_documents"]
             ToolNode --> T3["get_document_overview"]
             ToolNode --> T4["calculate_expression"]
         end
 
-        ToolsCatalog --> CRAG_Eval{"Danh gia do tin cay"}
-        CRAG_Eval -- "Diem thap / Khong tim thay" --> QueryRewrite["Goi y viet lai truy van"]
+        ToolsCatalog --> CRAG_Eval{"Đánh giá độ tin cậy"}
+        CRAG_Eval -- "Điểm thấp / Cần viết lại" --> QueryRewrite["Gợi ý viết lại truy vấn"]
         QueryRewrite --> AgentNode
-        CRAG_Eval -- "Diem tin cay cao" --> ToolMsg["Tra ve ToolMessage"]
+        CRAG_Eval -- "Độ tin cậy đạt" --> ToolMsg["Trả về ToolMessage"]
         ToolMsg --> AgentNode
         
-        ToolCond -- "Hoan thanh cau tra loi" --> Pruner["Cat tia ngu canh cu & Sliding Window"]
-        Pruner --> FinalStream["Stream SSE: Noi dung + Suy nghi + Telemetry"]
+        ToolCond -- "Hoàn thành phản hồi" --> Pruner["Cắt tỉa ngữ cảnh & Sliding Window"]
+        Pruner --> FinalStream["Stream SSE: Nội dung + Suy nghĩ + Telemetry"]
     end
 
     FinalStream --> User
     S1_Direct --> User
     S1_CacheHit --> User
-
-    classDef default fill:#000000,stroke:#ffffff,stroke-width:1.5px,color:#ffffff;
 ```
 
 ---
@@ -232,44 +212,27 @@ flowchart TD
 ## 5. Quy trình nạp tài liệu và tìm kiếm kết hợp (2-Stage Hybrid Retrieval)
 
 ```mermaid
-%%{init: {
-  'theme': 'base',
-  'themeVariables': {
-    'background': '#000000',
-    'primaryColor': '#000000',
-    'primaryTextColor': '#ffffff',
-    'primaryBorderColor': '#ffffff',
-    'lineColor': '#ffffff',
-    'textColor': '#ffffff',
-    'edgeLabelBackground': '#000000',
-    'clusterBkg': '#000000',
-    'clusterBorder': '#ffffff'
-  }
-}}%%
 flowchart LR
-    subgraph Ingestion ["Tiep Nhan & Xu Ly Tai Lieu"]
-        File["Tep tai len (.pdf, .csv, .md, .txt)"] --> DocRoute["/documents/upload"]
-        DocRoute --> BG["FastAPI BackgroundTasks"]
-        BG --> Extract["Trich xuat: Gemini Vision OCR + pypdf"]
-        Extract --> Chunking["Phan doan theo Markdown + So trang"]
-        Chunking --> Embed["Tao Vector: text-embedding-004"]
-        Chunking --> BM25_Idx["Lap chi muc tu khoa: BM25 (SQLite)"]
-        Embed --> Milvus_Idx["Luu tru Vector: Milvus DB"]
+    subgraph Ingestion ["Tiếp nhận & Xử lý tài liệu ngầm (Async)"]
+        File["Tệp tải lên (.pdf, .csv, .md, .txt)"] --> DocRoute["FastAPI BackgroundTasks"]
+        DocRoute --> Extract["Trích xuất: Vision OCR + pypdf"]
+        Extract --> Chunking["Phân đoạn Markdown + Số trang"]
+        Chunking --> Embed["Tạo Vector: text-embedding-004"]
+        Chunking --> BM25_Idx["Chỉ mục từ khóa: BM25 (SQLite)"]
+        Embed --> Milvus_Idx["Cơ sở dữ liệu Vector: Milvus DB"]
     end
 
-    subgraph Retrieval ["Truy Van 2 Giai Doan"]
-        Query["Cau hoi"] --> Dense["Dense Search (Milvus Cosine)"]
+    subgraph Retrieval ["Quy trình truy vấn hỗn hợp (2-Stage Hybrid)"]
+        Query["Câu hỏi người dùng"] --> Dense["Dense Search (Milvus Cosine)"]
         Query --> Sparse["Sparse Search (BM25 Lexical)"]
-        Dense --> RRF["Hop nhat thu hang RRF (k=60)"]
+        Dense --> RRF["Hợp nhất thứ hạng RRF (k=60)"]
         Sparse --> RRF
-        RRF --> Candidates["Top-10 ung vien ban dau"]
-        Candidates --> Rerank["Tai xep hang: BGE Cross-Encoder"]
-        Rerank --> TopK["Top-3 doan trich phu hop nhat"]
-        TopK --> WinExp["Mo rong cua so lan can (i-1, i, i+1)"]
-        WinExp --> FinalContext["Ngu canh hoan chinh dua vao LLM"]
+        RRF --> Candidates["Top-10 Đoạn trích ứng viên"]
+        Candidates --> Rerank["Tái xếp hạng: BGE Cross-Encoder"]
+        Rerank --> TopK["Top-3 Đoạn trích phù hợp nhất"]
+        TopK --> WinExp["Mở rộng cửa sổ lân cận (i-1, i, i+1)"]
+        WinExp --> FinalContext["Ngữ cảnh hoàn chỉnh đưa vào LLM"]
     end
-
-    classDef default fill:#000000,stroke:#ffffff,stroke-width:1.5px,color:#ffffff;
 ```
 
 - **Quy trình nạp tài liệu**:
