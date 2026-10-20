@@ -1,4 +1,4 @@
-# Enterprise AI Documents Assistant — Production-grade Agentic RAG System
+# AI Documents Assistant
 
 [![CI/CD Pipeline](https://github.com/NguyenVietNguyen2612/ai_documents_assistant/actions/workflows/ci-cd.yml/badge.svg)](https://github.com/NguyenVietNguyen2612/ai_documents_assistant/actions/workflows/ci-cd.yml)
 [![Python](https://img.shields.io/badge/Python-3.12+-3776AB?logo=python&logoColor=white)](https://www.python.org/)
@@ -6,276 +6,269 @@
 [![LangGraph](https://img.shields.io/badge/LangGraph-0.2+-FF6F00?logo=langchain&logoColor=white)](https://langchain-ai.github.io/langgraph/)
 [![Milvus](https://img.shields.io/badge/Milvus-2.4+-00A4E4?logo=linuxcontainers&logoColor=white)](https://milvus.io/)
 [![React](https://img.shields.io/badge/React-18+-61DAFB?logo=react&logoColor=black)](https://react.dev/)
-[![Automated Tests](https://img.shields.io/badge/Tests-32%2F32%20PASS%20(100%25)-success)](backend/auto_tests/)
-[![Architecture](https://img.shields.io/badge/Architecture-Two--System%20ReAct-blueviolet)](#2-kien-truc-tong-the-two-system-architecture)
+[![Automated Tests](https://img.shields.io/badge/Tests-32%2F32%20PASS-success)](backend/auto_tests/)
 [![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-> **Hệ thống AI Agent RAG cấp Doanh nghiệp** xử lý tài liệu thông minh, kết hợp kiến trúc **Two-System Orchestration (System 1 Fast Classifier + System 2 LangGraph ReAct Agent)**, tìm kiếm hỗn hợp **2-Stage Hybrid Search (Milvus Dense + BM25 Lexical + BGE Cross-Encoder Reranker)**, cơ chế **Small-to-Big Window Expansion**, **Corrective RAG (Query Rewriting)**, **Milvus Semantic Caching (<50ms)** và **Xử lý tài liệu bất đồng bộ (Async Background Ingestion)**.
+> **Dự án cá nhân** tìm hiểu và thực hành xây dựng hệ thống trợ lý hỏi đáp tài liệu thông minh (RAG) sử dụng **FastAPI**, **LangGraph ReAct Agent**, **Milvus Vector Database** và giao diện **React**. Dự án tập trung vào việc thử nghiệm các kỹ thuật cải thiện chất lượng tìm kiếm (Hybrid Search, Reranking, Window Expansion) và tối ưu trải nghiệm tương tác với tài liệu.
 
 ---
 
 ## Mục lục
 
-1. [Tổng quan & Điểm khác biệt cốt lõi](#1-tong-quan--diem-khac-biet-cot-loi)
-2. [Kiến trúc Tổng thể (Two-System Architecture)](#2-kien-truc-tong-the-two-system-architecture)
-3. [Quy trình Ingestion & Truy xuất 2-Stage Hybrid Retrieval](#3-quy-trinh-ingestion--truy-xuat-2-stage-hybrid-retrieval)
-4. [Bảng Đánh giá Định lượng & Ablation Study (RAGOps)](#4-bang-danh-gia-dinh-luong--ablation-study-ragops)
-5. [Quyết định Kỹ thuật & Đánh đổi Kiến trúc (Engineering Trade-offs)](#5-quyet-dinh-ky-thuat--danh-doi-kien-truc-engineering-trade-offs)
-6. [Hệ sinh thái Multi-Tool Agent](#6-he-sinh-thai-multi-tool-agent)
-7. [Bảng Điểm Kiểm thử Tự động (Automated Test Scorecard: 32/32 PASS)](#7-bang-diem-kiem-thu-tu-dong-automated-test-scorecard-3232-pass)
-8. [Danh mục REST API](#8-danh-muc-rest-api)
-9. [Hướng dẫn Cài đặt & Khởi chạy Nhanh](#9-huong-dan-cai-dat--khoi-chay-nhanh)
-10. [Triển khai Docker & Kubernetes](#10-trien-khai-docker--kubernetes)
+1. [Giới thiệu & Các tính năng chính](#1-giới-thiệu--các-tính-năng-chính)
+2. [Kiến trúc luồng xử lý (Two-System Architecture)](#2-kiến-trúc-luồng-xử-lý-two-system-architecture)
+3. [Quy trình nạp tài liệu và tìm kiếm kết hợp (2-Stage Hybrid Retrieval)](#3-quy-trình-nạp-tài-liệu-và-tìm-kiếm-kết-hợp-2-stage-hybrid-retrieval)
+4. [Thử nghiệm đánh giá hiệu quả (Ablation Study)](#4-thử-nghiệm-đánh-giá-hiệu-quả-ablation-study)
+5. [Các lựa chọn thiết kế kỹ thuật](#5-các-lựa-chọn-thiết-kế-kỹ-thuật)
+6. [Các công cụ của Agent (Multi-Tool Ecosystem)](#6-các-công-cụ-của-agent-multi-tool-ecosystem)
+7. [Kết quả kiểm thử tự động (32/32 tests)](#7-kết-quả-kiểm-thử-tự-động-3232-tests)
+8. [Danh mục REST API](#8-danh-mục-rest-api)
+9. [Hướng dẫn cài đặt & khởi chạy](#9-hướng-dẫn-cài-đặt--khởi-chạy)
+10. [Triển khai với Docker & Kubernetes](#10-triển-khai-với-docker--kubernetes)
 
 ---
 
-## 1. Tổng quan & Điểm khác biệt cốt lõi
+## 1. Giới thiệu & Các tính năng chính
 
-Phần lớn các dự án RAG thông thường chỉ là chuỗi nối thư viện cơ bản (*"Upload PDF -> Chunk cố định -> Vector DB -> Prompt LLM"*), thường gặp các vấn đề nghiêm trọng khi đưa vào môi trường thực tế:
-- **Tắc nghẽn HTTP**: Upload tài liệu lớn làm đơ kết nối do OCR và embedding chạy đồng bộ.
-- **Mất mát ngữ cảnh (Boundary Loss)**: Cắt chunk cố định làm đứt gãy bảng biểu và công thức toán học.
-- **Chi phí & Độ trễ cao**: Mọi câu hỏi (kể cả câu chào hỏi hoặc câu hỏi lặp lại) đều phải nạp toàn bộ lịch sử và gọi LLM.
-- **Ảo giác khi tìm kiếm thất bại**: Khi Vector DB trả về tài liệu không liên quan, LLM tự bịa câu trả lời.
+Dự án được xây dựng nhằm mục đích học tập các khái niệm hiện đại trong xây dựng ứng dụng AI với mô hình Agentic Workflow (LangGraph) thay vì chuỗi RAG cố định, đồng thời áp dụng các giải pháp thực tế để xử lý các vấn đề thường gặp khi làm việc với tài liệu:
 
-**AI Documents Assistant** giải quyết triệt để các bài toán này bằng kiến trúc kỹ thuật cấp production:
-
-| Tiêu chí Kỹ thuật | Project RAG Thông thường (Tutorial) | AI Documents Assistant (Hệ thống này) |
-| :--- | :--- | :--- |
-| **Kiến trúc Điều phối** | Tuyến tính cố định (`RetrievalQA`) | **Two-System Architecture**: System 1 Router (<1ms) + System 2 LangGraph ReAct Agent |
-| **Chiến lược Tìm kiếm** | Dense Vector Cosine duy nhất | **2-Stage Hybrid Search**: Dense Vector (Milvus) + Lexical (BM25) RRF + BGE Cross-Encoder Reranker |
-| **Ngữ cảnh Cắt chunk** | Cắt cứng kích thước cố định (500-1000 ký tự) | **Small-to-Big Window Expansion**: Tự động mở rộng cửa sổ liền kề ($i-1, i, i+1$) xung quanh chunk thắng giải |
-| **Xử lý Khi thiếu Dữ liệu** | Dễ sinh ảo giác hoặc trả lời lan man | **Corrective RAG (CRAG)**: Phân tầng độ tự tin, tự kích hoạt **Query Rewriting** dịch sang thuật ngữ học thuật để truy vấn lại |
-| **Tối ưu Chi phí & Token** | Gửi toàn bộ lịch sử thô qua mỗi lượt | **Milvus Semantic Cache** (<50ms, 0 LLM token) + **ToolMessage Context Pruning** (giảm 60–70% token) |
-| **Quy trình Nạp Tài liệu** | Chặn luồng HTTP Request chờ OCR | **Async Background Ingestion**: Phản hồi HTTP tức thì, background task xử lý + polling tiến trình real-time |
-| **UX & Trích dẫn Nguồn** | Không trích dẫn hoặc chỉ ghi tên file chung | **Interactive Citations**: Nhấn trực tiếp nhảy đúng trang PDF, tô sáng đoạn trích hoặc bảng biểu |
-| **Kiểm định Chất lượng** | Thử nghiệm thủ công cảm tính | **RAGOps Pipeline & Ablation Study**: Đo định lượng Hit Rate@1/3, MRR@3, Faithfulness, RAG Triad |
+- **Hỏi đáp thông minh theo ngữ cảnh tài liệu**:
+  - Hỗ trợ tải lên và xử lý nhiều định dạng: `.pdf`, `.csv`, `.md`, `.txt`.
+  - Phân tích văn bản kết hợp OCR hình ảnh/bảng biểu (Gemini Vision) và trích xuất cấu trúc đề mục Markdown.
+  - Lưu trữ số trang thực tế của từng đoạn văn bản để người dùng có thể nhấp trực tiếp vào nguồn trích dẫn và mở đúng trang PDF tương ứng.
+- **Định tuyến 2 cấp (Two-System Routing)**:
+  - **Lớp định tuyến nhanh (System 1)**: Nhận diện các câu chào hỏi hoặc câu hỏi thông thường để phản hồi trực tiếp mà không cần khởi tạo luồng ReAct phức tạp.
+  - **Lớp suy luận đa bước (System 2)**: Sử dụng LangGraph StateGraph cho các câu hỏi cần tra cứu tài liệu, tính toán hoặc tổng hợp thông tin qua nhiều bước.
+- **Tìm kiếm hỗn hợp 2 giai đoạn (2-Stage Hybrid Search)**:
+  - Kết hợp Dense Vector Search (Milvus Cosine) với Lexical Search (BM25) thông qua thuật toán Reciprocal Rank Fusion (RRF).
+  - Tái chấm điểm và xếp hạng lại (Reranking) top kết quả bằng mô hình Cross-Encoder (`BAAI/bge-reranker-base`) để chọn ra các đoạn văn liên quan nhất.
+- **Mở rộng cửa sổ ngữ cảnh (Small-to-Big Window Expansion)**:
+  - Tự động ghép nối các đoạn văn lân cận ($i-1, i, i+1$) xung quanh đoạn trích có điểm số cao nhất nhằm tránh mất mát ngữ cảnh ở ranh giới cắt chunk.
+- **Cơ chế gợi ý viết lại truy vấn (Corrective RAG)**:
+  - Khi điểm tương quan của tài liệu tìm được ở mức thấp, hệ thống kích hoạt cảnh báo để Agent thực hiện diễn đạt lại câu hỏi (Query Rewriting) hoặc dịch thuật ngữ sang tiếng Anh học thuật để thử tra cứu lại.
+- **Bộ nhớ đệm ngữ nghĩa (Semantic Cache)**:
+  - Lưu trữ các cặp câu hỏi - câu trả lời trên Milvus; khi người dùng đặt câu hỏi có ý nghĩa tương đương ($\ge 0.95$), hệ thống có thể phản hồi nhanh từ cache mà không cần gọi lại LLM.
+- **Xử lý tài liệu ngầm (Async Background Ingestion)**:
+  - Quá trình đọc file, OCR, chia đoạn và tạo vector được đưa vào `BackgroundTasks` của FastAPI.
+  - Phản hồi HTTP ngay lập tức và hỗ trợ giao diện polling trạng thái xử lý theo thời gian thực (2 giây/lần).
+- **Trải nghiệm giao diện (UI/UX)**:
+  - Hỗ trợ gắn thẻ `@tài_liệu` để giới hạn phạm vi tìm kiếm vào một tài liệu cụ thể.
+  - Tách luồng suy luận `<think>...</think>` (Chain-of-Thought) hiển thị riêng biệt qua Server-Sent Events (SSE).
+  - Hiển thị thanh thông số kỹ thuật (Telemetry) dưới mỗi câu trả lời: thời gian xử lý, điểm rerank, số bước gọi công cụ và nguồn trích dẫn.
 
 ---
 
-## 2. Kiến trúc Tổng thể (Two-System Architecture)
+## 2. Kiến trúc luồng xử lý (Two-System Architecture)
 
-Hệ thống được thiết kế theo mô hình tư duy **Dual-Process (System 1 - Heuristic Fast Path & System 2 - Deliberative ReAct Agent)**:
+Luồng điều phối hội thoại kết hợp giữa lớp phân loại nhanh và đồ thị trạng thái LangGraph:
 
 ```mermaid
 flowchart TD
-    User["👤 Người dùng / Client (React 18)"] --> API["🌐 FastAPI Server (/chat/stream)"]
+    User["👤 Người dùng / Giao diện React"] --> API["🌐 FastAPI Server (/chat/stream)"]
 
-    subgraph System1 ["⚡ SYSTEM 1: Fast Heuristic & Semantic Path (< 50ms)"]
-        API --> S1_Router{"Laya Decision Router"}
-        S1_Router -- "Chào hỏi / Xã giao" --> S1_Direct["💬 Trả lời Trực tiếp (<1ms)"]
-        S1_Router -- "Truy vấn phức tạp" --> S1_Cache{"Milvus Semantic Cache"}
-        S1_Cache -- "Cache Hit (Cosine ≥ 0.95)" --> S1_CacheHit["⚡ Trả lời Tức thì từ Cache (<50ms, 0 Token)"]
+    subgraph System1 ["⚡ LỚP ĐỊNH TUYẾN NHANH (System 1)"]
+        API --> S1_Router{"Bộ phân loại Laya / Heuristic"}
+        S1_Router -- "Câu chào hỏi / Xã giao" --> S1_Direct["💬 Trả lời trực tiếp"]
+        S1_Router -- "Yêu cầu tra cứu / Phân tích" --> S1_Cache{"Kiểm tra Semantic Cache (Milvus)"}
+        S1_Cache -- "Khớp ngữ nghĩa (≥ 0.95)" --> S1_CacheHit["⚡ Trả kết quả từ Cache"]
     end
 
-    subgraph System2 ["🧠 SYSTEM 2: LangGraph ReAct StateGraph Engine"]
-        S1_Cache -- "Cache Miss (< 0.95)" --> AgentNode["🤖 agent_node (LLM + ReAct Prompt)"]
+    subgraph System2 ["🧠 ĐỒ THỊ SUY LUẬN REACT (System 2)"]
+        S1_Cache -- "Chưa có trong Cache" --> AgentNode["🤖 agent_node (Mô hình LLM)"]
         
-        AgentNode --> ToolCond{"tools_condition (Max 3 Tiers)"}
+        AgentNode --> ToolCond{"tools_condition (Tối đa 3 lượt)"}
         
-        ToolCond -- "Yêu cầu Tra cứu" --> ToolNode["🛠️ tool_node"]
+        ToolCond -- "Cần gọi công cụ" --> ToolNode["🛠️ tool_node"]
         
-        subgraph ToolsCatalog ["Kho Công cụ Độc lập (backend/app/tools/)"]
-            ToolNode --> T1["🔍 retrieve_documents (2-Stage Hybrid + Window Expansion)"]
+        subgraph ToolsCatalog ["Danh mục công cụ (backend/app/tools/)"]
+            ToolNode --> T1["🔍 retrieve_documents (Hybrid Search + Mở rộng cửa sổ)"]
             ToolNode --> T2["📋 list_uploaded_documents"]
             ToolNode --> T3["📄 get_document_overview"]
-            ToolNode --> T4["🧮 calculate_expression (Safe AST Parser)"]
+            ToolNode --> T4["🧮 calculate_expression (Bộ phân tích cú pháp AST)"]
         end
 
-        ToolsCatalog --> CRAG_Eval{"Corrective RAG Evaluation"}
-        CRAG_Eval -- "Độ tin cậy Thấp / 0 Doc" --> QueryRewrite["🔄 Tự động Viết lại Truy vấn (English/Synonyms)"]
+        ToolsCatalog --> CRAG_Eval{"Đánh giá độ tin cậy"}
+        CRAG_Eval -- "Điểm thấp / Không tìm thấy" --> QueryRewrite["🔄 Gợi ý viết lại truy vấn"]
         QueryRewrite --> AgentNode
-        CRAG_Eval -- "Độ tin cậy Cao" --> ToolMsg["📝 Trả kết quả ToolMessage"]
+        CRAG_Eval -- "Điểm tin cậy cao" --> ToolMsg["📝 Trả về ToolMessage"]
         ToolMsg --> AgentNode
         
-        ToolCond -- "Hoàn thành / Không gọi Tool" --> Pruner["✂️ ToolMessage Pruning & Sliding Window"]
-        Pruner --> FinalStream["📡 SSE Stream: Tokens + CoT + Telemetry Footer"]
+        ToolCond -- "Hoàn thành câu trả lời" --> Pruner["✂️ Cắt tỉa ngữ cảnh cũ & Sliding Window"]
+        Pruner --> FinalStream["📡 Stream SSE: Nội dung + Suy nghĩ + Telemetry"]
     end
 
     FinalStream --> User
     S1_Direct --> User
     S1_CacheHit --> User
 
-    style System1 fill:#f0fdf4,stroke:#16a34a,stroke-width:2px,color:#14532d
-    style System2 fill:#eff6ff,stroke:#2563eb,stroke-width:2px,color:#1e3a8a
+    style System1 fill:#f0fdf4,stroke:#16a34a,stroke-width:1.5px,color:#14532d
+    style System2 fill:#eff6ff,stroke:#2563eb,stroke-width:1.5px,color:#1e3a8a
 ```
 
-### Chi tiết các Node & Edge trong LangGraph StateGraph:
-1. **`agent_node`**: Nhận danh sách tin nhắn ngữ cảnh, nạp `SystemMessage` chứa quy tắc ReAct và chỉ thị bóc tách suy luận `<think>...</think>`.
-2. **`tools_condition`**: Điều phối luồng ReAct dựa trên hành vi của mô hình:
-   - Nếu LLM tạo `tool_calls` và số lần gọi $< 3$: Chuyển tiếp tới `tool_node`.
-   - Nếu LLM xuất câu trả lời cuối cùng hoặc đã chạm trần 3 lần gọi tool: Chuyển thẳng về `END`.
-3. **`tool_node`**: Thực thi công cụ tương ứng (tra cứu tài liệu, tính toán toán học, tóm tắt tổng quan) và chuyển kết quả thành `ToolMessage`.
-4. **`ToolMessage Pruning & Sliding Window`**: Nén toàn bộ `ToolMessage` từ các lượt trước về $\le 150$ ký tự tóm tắt, cắt bỏ lịch sử vượt quá `max_window=16`, giúp giảm **60–70% Context Window Token** khi hội thoại kéo dài.
-5. **`AsyncSqliteSaver Checkpointing`**: Lưu trữ toàn bộ snapshot của StateGraph vào SQLite, hỗ trợ khôi phục phiên hội thoại và quay lui trạng thái (Rollback Time-Travel).
+### Các thành phần chính trong đồ thị:
+1. **`agent_node`**: Tiếp nhận lịch sử tin nhắn và yêu cầu người dùng, hướng dẫn mô hình suy luận trong thẻ `<think>...</think>` trước khi đưa ra hành động.
+2. **`tools_condition`**: Kiểm tra phản hồi của LLM để quyết định chuyển sang `tool_node` hay kết thúc đồ thị (giới hạn tối đa 3 lần gọi công cụ để tránh lặp vô tận).
+3. **`tool_node`**: Điều hướng thực thi công cụ tương ứng và gửi kết quả về lại cho Agent.
+4. **`Cắt tỉa ngữ cảnh & Sliding Window`**: Nén ngắn các `ToolMessage` từ những lượt hội thoại trước về dạng tóm tắt ngắn ($\le 150$ ký tự) và giữ tối đa 16 tin nhắn gần nhất để kiểm soát số lượng token gửi vào LLM.
+5. **`Lưu trữ Checkpoint`**: Sử dụng `AsyncSqliteSaver` để lưu snapshot từng bước vào SQLite, cho phép khôi phục phiên chat và quay lui trạng thái (Rollback).
 
 ---
 
-## 3. Quy trình Ingestion & Truy xuất 2-Stage Hybrid Retrieval
+## 3. Quy trình nạp tài liệu và tìm kiếm kết hợp (2-Stage Hybrid Retrieval)
 
 ```mermaid
 flowchart LR
-    subgraph Ingestion ["📥 ASYNC INGESTION PIPELINE"]
-        File["📄 Tài liệu (.pdf, .csv, .md, .txt)"] --> DocRoute["/documents/upload"]
+    subgraph Ingestion ["📥 TIẾP NHẬN & XỬ LÝ TÀI LIỆU"]
+        File["📄 Tệp tải lên (.pdf, .csv, .md, .txt)"] --> DocRoute["/documents/upload"]
         DocRoute --> BG["⚙️ FastAPI BackgroundTasks"]
-        BG --> Extract["👁️ Gemini Vision OCR + pypdf"]
-        Extract --> Chunking["✂️ Markdown Structural Chunking (Page-aware)"]
-        Chunking --> Embed["🔢 text-embedding-004"]
-        Chunking --> BM25_Idx["🔤 BM25 Inverted Index (SQLite/Disk)"]
-        Embed --> Milvus_Idx["💾 Milvus Vector DB (HNSW Index)"]
+        BG --> Extract["Trích xuất: Gemini Vision OCR + pypdf"]
+        Extract --> Chunking["Phân đoạn theo tiêu đề Markdown + Số trang"]
+        Chunking --> Embed["Tạo Vector: text-embedding-004"]
+        Chunking --> BM25_Idx["Lập chỉ mục từ khóa: BM25 (SQLite)"]
+        Embed --> Milvus_Idx["Lưu trữ Vector: Milvus DB (HNSW Index)"]
     end
 
-    subgraph Retrieval ["🔎 2-STAGE HYBRID RETRIEVAL"]
-        Query["❓ Truy vấn"] --> Dense["Dense Search (Milvus Cosine)"]
-        Query --> Sparse["Sparse Search (BM25 Token Match)"]
-        Dense --> RRF["🔀 Reciprocal Rank Fusion (RRF k=60)"]
+    subgraph Retrieval ["🔎 TRUY VẤN 2 GIAI ĐOẠN"]
+        Query["❓ Câu hỏi"] --> Dense["Dense Search (Milvus Cosine)"]
+        Query --> Sparse["Sparse Search (BM25 Lexical)"]
+        Dense --> RRF["Hợp nhất thứ hạng RRF (k=60)"]
         Sparse --> RRF
-        RRF --> Candidates["Top-10 Đoạn trích Ứng viên"]
-        Candidates --> Rerank["🎯 BGE Cross-Encoder Reranker (BAAI/bge-reranker-base)"]
-        Rerank --> TopK["Top-3 Đoạn trích Xuất sắc nhất"]
-        TopK --> WinExp["🪟 Small-to-Big Window Expansion (Chunks i-1, i, i+1)"]
-        WinExp --> FinalContext["📋 Ngữ cảnh Mạch lạc Đầy đủ"]
+        RRF --> Candidates["Top-10 ứng viên ban đầu"]
+        Candidates --> Rerank["Tái xếp hạng: BGE Cross-Encoder"]
+        Rerank --> TopK["Top-3 đoạn trích phù hợp nhất"]
+        TopK --> WinExp["Mở rộng cửa sổ lân cận (Chunks i-1, i, i+1)"]
+        WinExp --> FinalContext["Ngữ cảnh hoàn chỉnh đưa vào LLM"]
     end
 
-    style Ingestion fill:#fefce8,stroke:#ca8a04,stroke-width:2px,color:#713f12
-    style Retrieval fill:#f5f3ff,stroke:#7c3aed,stroke-width:2px,color:#4c1d95
+    style Ingestion fill:#fefce8,stroke:#ca8a04,stroke-width:1.5px,color:#713f12
+    style Retrieval fill:#f5f3ff,stroke:#7c3aed,stroke-width:1.5px,color:#4c1d95
 ```
 
-- **Async Background Ingestion**: Khi người dùng tải lên tài liệu, endpoint phản hồi HTTP `200 OK` tức thì với `status: 'processing'`. Quá trình OCR, trích xuất cấu trúc bảng biểu, tạo embedding và lập chỉ mục BM25 chạy ngầm trong `BackgroundTasks`. Giao diện tự động polling mỗi 2 giây để cập nhật huy hiệu trạng thái sang `ready`.
-- **2-Stage Hybrid Retrieval**: Kết hợp thế mạnh hiểu ngữ nghĩa của Dense Vector Embedding với độ chính xác từ khóa tuyệt đối (mã hiệu sản phẩm, tên biến, số liệu) của BM25 qua thuật toán **Reciprocal Rank Fusion (RRF)**:
-  $$\text{RRF\_Score}(d) = \sum_{m \in \{\text{dense}, \text{bm25}\}} \frac{1}{k + \text{rank}_m(d)} \quad (k = 60)$$
-- **BGE Cross-Encoder Reranking**: Mô hình Cross-Encoder nhận đồng thời cặp `(Query, Chunk)` để tính toán mức độ liên quan sâu qua các lớp Self-Attention, khắc phục hoàn toàn nhược điểm tính độc lập của Bi-Encoder.
-- **Small-to-Big Window Expansion**: Khi tìm thấy chunk $i$ có điểm số cao nhất, hệ thống tự động kéo thêm các chunk liền kề $i-1$ và $i+1$ từ cùng một tài liệu, nối liền mạch văn bản mà không làm loãng vector tìm kiếm ban đầu.
+- **Quy trình nạp tài liệu**:
+  1. Khi người dùng tải tệp lên, hệ thống phản hồi ngay mã tài liệu và trạng thái `processing`.
+  2. Tác vụ ngầm thực hiện OCR nhận diện văn bản, cấu trúc bảng biểu và trích xuất số trang.
+  3. Nội dung được chia đoạn theo phân cấp tiêu đề Markdown (`#`, `##`, `###`) để giữ ngữ cảnh phân mục.
+  4. Lưu đồng thời vector vào Milvus và từ khóa vào chỉ mục BM25 cục bộ.
+- **Hợp nhất kết quả bằng RRF**:
+  Sử dụng công thức Reciprocal Rank Fusion với hằng số $k = 60$ để kết hợp thứ hạng từ Dense Vector và BM25:
+  $$\text{RRF\_Score}(d) = \sum_{m \in \{\text{dense}, \text{bm25}\}} \frac{1}{k + \text{rank}_m(d)}$$
+- **Reranker với Cross-Encoder**:
+  Mô hình `BAAI/bge-reranker-base` chấm điểm trực tiếp cặp `(Câu hỏi, Đoạn trích)` để chọn ra top kết quả có độ tương quan ngữ nghĩa cao nhất.
+- **Mở rộng cửa sổ (Window Expansion)**:
+  Lấy thêm các đoạn liền kề trước và sau đoạn trích tốt nhất giúp mô hình nắm được câu văn hoàn chỉnh, hạn chế việc bị cắt đứt giữa câu hoặc mất phần giải thích công thức.
 
 ---
 
-## 4. Bảng Đánh giá Định lượng & Ablation Study (RAGOps)
+## 4. Thử nghiệm đánh giá hiệu quả (Ablation Study)
 
-Thực nghiệm so sánh đa phương pháp được thực thi trên bộ dữ liệu kiểm định chuyên biệt ([`backend/evaluation/dataset.json`](backend/evaluation/dataset.json)) với 10 câu hỏi bao quát từ khóa chuyên sâu, từ đồng nghĩa và thông số kỹ thuật:
+Để kiểm tra xem việc kết hợp BM25 và Cross-Encoder có thực sự cải thiện khả năng tìm kiếm so với chỉ dùng Vector đơn thuần hay không, dự án thực hiện đo lường trên bộ câu hỏi thử nghiệm ([`backend/evaluation/dataset.json`](backend/evaluation/dataset.json)) với các dạng truy vấn khác nhau (từ khóa đặc thù, tên riêng, câu hỏi ngữ nghĩa):
 
-| Phương pháp Truy xuất | Hit Rate@1 | Hit Rate@3 | MRR@3 | Keyword Coverage | Độ trễ TB (Latency) |
+| Phương pháp truy xuất | Hit Rate@1 | Hit Rate@3 | MRR@3 | Độ phủ từ khóa | Thời gian trung bình |
 | :--- | :---: | :---: | :---: | :---: | :---: |
-| **Dense Vector Only (Milvus)** | 90.0% | 90.0% | 0.900 | 96.0% | **~38 ms** |
-| **Hybrid Search (Milvus + BM25 RRF)** | 90.0% | **100.0%** *(+10%)* | 0.950 | **100.0%** *(+4%)* | ~47 ms |
-| **2-Stage (Hybrid RRF + BGE Reranker)** | **100.0%** *(+10%)* | **100.0%** | **1.000** *(+0.100)* | **100.0%** | ~142 ms |
+| **Chỉ dùng Dense Vector (Milvus)** | 90.0% | 90.0% | 0.900 | 96.0% | **~38 ms** |
+| **Tìm kiếm kết hợp (Milvus + BM25 RRF)** | 90.0% | **100.0%** | 0.950 | **100.0%** | ~47 ms |
+| **Kết hợp + Tái xếp hạng (Hybrid + BGE Reranker)** | **100.0%** | **100.0%** | **1.000** | **100.0%** | ~142 ms |
 
 > [!NOTE]
-> **Nhận xét Phân tích Kỹ thuật:**
-> - **Dense Vector Only** bị trượt ở các câu hỏi chứa mã định danh học thuật chính xác (ví dụ *"Kiến trúc FreqNet"* hoặc các hằng số kỹ thuật), do vector embedding có xu hướng dàn đều ngữ nghĩa.
-> - **Hybrid Search (BM25 + Milvus RRF)** kéo được 100% tài liệu liên quan vào Top-3, giải quyết triệt để vấn đề từ khóa đặc thù.
-> - **2-Stage BGE Cross-Encoder Reranker** đưa kết quả chính xác nhất lên vị trí Top-1 trong **100% các ca thử nghiệm** (MRR = 1.000), chấp nhận chi phí đánh đổi độ trễ thêm ~95ms — một mức đánh đổi hoàn toàn xứng đáng cho các hệ thống đòi hỏi độ tin cậy tuyệt đối.
+> **Ghi nhận từ kết quả thử nghiệm:**
+> - Phương pháp chỉ dùng Vector gặp khó khăn ở các câu hỏi chứa mã định danh học thuật chính xác (ví dụ các tên viết tắt kỹ thuật) do vector embedding có xu hướng dàn đều ngữ nghĩa.
+> - Khi bổ sung BM25 thông qua RRF, toàn bộ tài liệu mục tiêu đều xuất hiện trong Top-3 kết quả tìm kiếm.
+> - Bước tái xếp hạng bằng BGE Cross-Encoder giúp đưa đoạn trích chính xác nhất lên vị trí Top-1 trong các ca thử nghiệm, tuy nhiên thời gian phản hồi tăng thêm khoảng 95ms do mô hình Cross-Encoder cần xử lý qua nhiều lớp attention.
 
 ---
 
-## 5. Quyết định Kỹ thuật & Đánh đổi Kiến trúc (Engineering Trade-offs)
+## 5. Các lựa chọn thiết kế kỹ thuật
 
-Khi xây dựng một hệ thống AI ở quy mô sản xuất, mọi giải pháp công nghệ đều đi kèm đánh đổi. Dưới đây là 6 quyết định kỹ thuật cốt lõi của dự án:
+Trong quá trình phát triển, một số giải pháp kỹ thuật đã được cân nhắc để cân đối giữa chi phí, thời gian xử lý và độ chính xác:
 
-### 1. Two-System Router (System 1) vs. Luôn gọi ReAct Graph (System 2)
-- **Đánh đổi**: Tốn thêm một lớp heuristic rule & Laya classifier trước khi vào LangGraph.
-- **Lý do lựa chọn**: Các câu chào hỏi (`"Xin chào"`, `"Bạn là ai"`) hoặc câu hỏi xã giao chiếm 20–30% lưu lượng thực tế. System 1 phản hồi trực tiếp trong $<1\text{ms}$ giúp tiết kiệm 100% chi phí gọi LLM và giảm áp lực hàng đợi cho StateGraph.
-
-### 2. Reciprocal Rank Fusion (RRF) vs. Tuyến tính hóa Điểm số (Score Normalization)
-- **Đánh đổi**: RRF loại bỏ giá trị độ lớn khoảng cách tuyệt đối của cosine và BM25 score.
-- **Lý do lựa chọn**: Điểm số Cosine Similarity và BM25 có phân phối và miền giá trị hoàn toàn khác nhau. Việc chuẩn hóa Min-Max thường bị méo mó khi có phân đoạn ngoại lai (outliers). RRF dựa trên thứ tự xếp hạng (Rank-based) hoạt động bền bỉ và ổn định hơn mà không cần tinh chỉnh trọng số thủ công.
-
-### 3. Small-to-Big Window Expansion vs. Tăng kích thước Chunk gốc (Large Chunk)
-- **Đánh đổi**: Tốn thêm một lượt truy vấn SQLite/Milvus theo `chunk_index` để lấy chunk lân cận.
-- **Lý do lựa chọn**: Nếu cắt chunk quá lớn (ví dụ 3000 ký tự), vector embedding sẽ bị "loãng" ngữ nghĩa (Embedding Saturation), làm giảm độ chính xác tìm kiếm. Cắt nhỏ (small chunk) giúp tìm kiếm nhạy bén, sau đó mở rộng ngữ cảnh (big context) trước khi đưa vào LLM đảm bảo câu trả lời không bị mất đầu cụt đuôi.
-
-### 4. Milvus Semantic Cache vs. Exact Match In-Memory Cache (Redis)
-- **Đánh đổi**: Tốn 1 lần tính toán embedding cho câu hỏi truy vấn (~25ms).
-- **Lý do lựa chọn**: Trong giao tiếp ngôn ngữ tự nhiên, hai người dùng hiếm khi đặt câu hỏi giống hệt nhau từng ký tự (ví dụ: *"FreqNet là gì?"* vs *"Hãy giải thích mô hình FreqNet"*). Semantic Cache trên Milvus với ngưỡng Cosine $\ge 0.95$ nhận diện chính xác các câu hỏi tương đồng ngữ nghĩa, trả lời dưới $50\text{ms}$ và tự động hủy cache khi có tài liệu mới tải lên.
-
-### 5. ToolMessage Context Pruning vs. Giữ toàn bộ lịch sử thô (Raw History)
-- **Đánh đổi**: LLM không thể đọc lại toàn văn hàng chục nghìn ký tự của tài liệu được trích xuất từ 5 lượt chat trước.
-- **Lý do lựa chọn**: Trong hội thoại đa lượt, các `ToolMessage` cũ chiếm tới 70% Context Window Token, làm tăng chi phí và dễ khiến LLM bị phân tâm ("Lost in the Middle"). Việc nén kết quả cũ về dạng tóm tắt $\le 150$ ký tự và giữ nguyên 100% kết quả ở lượt hiện tại giúp tối ưu chi phí và tăng tốc độ suy luận của LLM.
-
-### 6. Xử lý Nạp Tài liệu Bất đồng bộ (Async Ingestion) vs. Đồng bộ (Sync Blocking)
-- **Đánh đổi**: Frontend cần cơ chế polling liên tục (2s/lần) và Backend phải quản lý trạng thái máy (`processing`, `ready`, `error`).
-- **Lý do lựa chọn**: Quá trình OCR Gemini Vision và tạo Embedding cho tài liệu 20 trang mất từ 15 đến 30 giây. Xử lý đồng bộ sẽ gây timeout HTTP Request trên các reverse proxy (Nginx, Cloudflare) và làm đóng băng giao diện người dùng.
+1. **Lớp định tuyến nhanh (System 1)**:
+   - Các câu chào hỏi hoặc giao tiếp ngắn không cần thiết phải chạy qua chuỗi suy luận ReAct. Việc phân loại sớm giúp phản hồi ngay cho người dùng và giảm bớt số lần gọi API bên ngoài.
+2. **Sử dụng thuật toán RRF thay vì chuẩn hóa điểm**:
+   - Điểm số Cosine Similarity và điểm BM25 có phân phối và biên độ khác nhau. Thay vì cố gắng co giãn điểm số vốn dễ bị ảnh hưởng bởi giá trị ngoại lai, RRF dựa trên thứ tự xếp hạng giúp kết quả ổn định hơn.
+3. **Mở rộng cửa sổ ngữ cảnh (Window Expansion)**:
+   - Cắt đoạn văn bản ngắn (khoảng 800 - 1000 ký tự) giúp vector nhạy hơn trong việc nắm bắt ý chính. Sau khi tìm được vị trí phù hợp, việc kéo thêm đoạn trước và đoạn sau vào prompt giúp câu trả lời của mô hình có đủ ngữ cảnh mà không làm giảm độ chính xác lúc tìm kiếm.
+4. **Bộ nhớ đệm ngữ nghĩa (Semantic Cache)**:
+   - Đối với các câu hỏi tương tự nhau về mặt ngữ nghĩa (ngưỡng Cosine $\ge 0.95$), hệ thống có thể trả lời trực tiếp từ cache. Cache sẽ tự động được xóa khi có tài liệu mới tải lên hoặc bị xóa để tránh trả lời bằng dữ liệu cũ.
+5. **Cắt tỉa ngữ cảnh cũ (ToolMessage Pruning)**:
+   - Trong các cuộc trò chuyện kéo dài, kết quả tra cứu của các lượt chat trước chiếm rất nhiều dung lượng token. Rút gọn các kết quả cũ về dạng tóm tắt ngắn giúp giữ cho cửa sổ ngữ cảnh luôn nằm trong giới hạn hợp lý.
+6. **Xử lý tài liệu ngầm (Background Ingestion)**:
+   - Việc OCR và tạo embedding cho các tài liệu dài có thể mất từ 15 đến 30 giây. Việc đưa công việc này vào background task giúp người dùng không phải chờ đợi ở màn hình upload và có thể tiếp tục thao tác khác.
 
 ---
 
-## 6. Hệ sinh thái Multi-Tool Agent
+## 6. Các công cụ của Agent (Multi-Tool Ecosystem)
 
-Tất cả các công cụ của Agent được thiết kế theo dạng module độc lập đặt tại [`backend/app/tools/`](backend/app/tools/):
+Các công cụ được tổ chức tách biệt tại thư mục [`backend/app/tools/`](backend/app/tools/):
 
-```
-backend/app/tools/
-├── __init__.py                  # Registry tập trung xuất danh sách AVAILABLE_TOOLS
-├── retrieve_tool.py             # Truy xuất tài liệu (2-Stage Hybrid + Window Expansion + CRAG)
-├── list_documents_tool.py       # Tra cứu danh mục tài liệu đã nạp & số trang/chunk
-├── document_overview_tool.py    # Xem tóm tắt cấu trúc và bảng mục lục của tài liệu cụ thể
-└── calculator_tool.py           # Bộ tính toán biểu thức toán học an toàn qua AST Parser
-```
-
-### Điểm nhấn Bảo mật: `calculate_expression`
-Không sử dụng hàm `eval()` nguy hiểm dễ bị tấn công mã độc (Arbitrary Code Execution). Công cụ tính toán được xây dựng trên bộ phân tích cú pháp cây trừu tượng **Python AST (`ast.parse`)**, chỉ cho phép các phép toán số học cơ bản (`+`, `-`, `*`, `/`, `**`, `%`) và chặn đứng mọi nỗ lực khai thác lỗ hổng hệ thống.
+- **`retrieve_documents`**: Tra cứu đoạn văn bản liên quan trong tài liệu (kết hợp Milvus, BM25, Reranker và mở rộng cửa sổ).
+- **`list_uploaded_documents`**: Liệt kê danh sách các tài liệu hiện có kèm số lượng trang và trạng thái.
+- **`get_document_overview`**: Lấy thông tin tóm tắt và cấu trúc các đề mục chính của một tài liệu cụ thể.
+- **`calculate_expression`**: Hỗ trợ tính toán các phép toán số học (`+`, `-`, `*`, `/`, `**`, `%`, `round`). Sử dụng thư viện `ast` (Abstract Syntax Tree) của Python để phân tích cú pháp an toàn, không sử dụng hàm `eval()`.
 
 ---
 
-## 7. Bảng Điểm Kiểm thử Tự động (Automated Test Scorecard: 32/32 PASS)
+## 7. Kết quả kiểm thử tự động (32/32 tests)
 
-Dự án sở hữu bộ kiểm thử tự động toàn diện bao phủ từ Unit Test, Integration Test đến End-to-End Test luồng SSE Stream:
+Dự án có sẵn bộ script kiểm thử tự động để kiểm tra các thành phần từ backend API, dịch vụ xử lý tài liệu đến luồng stream SSE:
 
 ```bash
-# Chạy toàn bộ 32 bài test tự động với báo cáo chi tiết
+# Thực thi toàn bộ kiểm thử
 python backend/auto_tests/run_all_tests.py
 ```
 
-| STT | Tập tin Kiểm thử | Số lượng Test | Phạm vi Kiểm định | Kết quả |
+| STT | Tập tin kiểm thử | Số test | Nội dung kiểm tra | Trạng thái |
 | :---: | :--- | :---: | :--- | :---: |
-| 1 | [`test_unit_retriever_bm25.py`](backend/auto_tests/test_unit_retriever_bm25.py) | **7 tests** | Dense search, BM25 indexing, RRF fusion, Reranker, Window Expansion, Corrective RAG tiering | ✅ PASS |
-| 2 | [`test_unit_semantic_cache_and_pruning.py`](backend/auto_tests/test_unit_semantic_cache_and_pruning.py) | **4 tests** | Milvus Semantic Cache insertion/lookup, Cache Invalidation, ToolMessage Pruning, Sliding Window | ✅ PASS |
-| 3 | [`test_integration_api.py`](backend/auto_tests/test_integration_api.py) | **6 tests** | Async Upload, Document Status Polling, Document Deletion, `@tài_liệu` Scope Retrieval, Session CRUD | ✅ PASS |
-| 4 | [`test_integration_chat_stream.py`](backend/auto_tests/test_integration_chat_stream.py) | **3 tests** | Server-Sent Events (SSE) streaming format, `<think>` Chain-of-Thought chunking, Telemetry events | ✅ PASS |
-| 5 | [`test_tools.py`](backend/auto_tests/test_tools.py) | **5 tests** | Multi-Tool dispatching, AST Calculator security sandbox, Document Overview Tool | ✅ PASS |
-| 6 | [`test_unit_laya_router.py`](backend/auto_tests/test_unit_laya_router.py) | **4 tests** | System 1 Heuristic router, Confidence Guardrail fallback to retrieve, Direct answer routing | ✅ PASS |
-| 7 | [`test_unit_db_documents.py`](backend/auto_tests/test_unit_db_documents.py) | **3 tests** | SQLite schema migrations (`status`, `chunk_count`), Ghost/Orphan data synchronization | ✅ PASS |
-| **Tổng cộng** | **7 Modules** | **32 tests** | **Toàn bộ vòng đời ứng dụng (Ingestion, Retrieval, Agent, Cache, API)** | **32/32 (100%)** |
+| 1 | [`test_unit_retriever_bm25.py`](backend/auto_tests/test_unit_retriever_bm25.py) | **7** | Tìm kiếm Milvus, BM25, RRF, Reranker, Window Expansion, Corrective RAG | ✅ PASS |
+| 2 | [`test_unit_semantic_cache_and_pruning.py`](backend/auto_tests/test_unit_semantic_cache_and_pruning.py) | **4** | Semantic Cache trên Milvus, xóa cache, cắt tỉa ToolMessage và Sliding Window | ✅ PASS |
+| 3 | [`test_integration_api.py`](backend/auto_tests/test_integration_api.py) | **6** | API upload ngầm, polling trạng thái, xóa file, phạm vi `@tài_liệu`, quản lý phiên | ✅ PASS |
+| 4 | [`test_integration_chat_stream.py`](backend/auto_tests/test_integration_chat_stream.py) | **3** | Luồng stream SSE, định dạng chunk suy nghĩ `<think>`, sự kiện telemetry | ✅ PASS |
+| 5 | [`test_tools.py`](backend/auto_tests/test_tools.py) | **5** | Khả năng kích hoạt công cụ của Agent, máy tính AST an toàn, Document Overview | ✅ PASS |
+| 6 | [`test_unit_laya_router.py`](backend/auto_tests/test_unit_laya_router.py) | **4** | Phân loại câu chào hỏi, ngưỡng tự tin tối thiểu (guardrail), fallback | ✅ PASS |
+| 7 | [`test_unit_db_documents.py`](backend/auto_tests/test_unit_db_documents.py) | **3** | Cập nhật cấu trúc SQLite, đồng bộ dữ liệu giữa SQLite và Milvus | ✅ PASS |
+| **Tổng cộng** | **7 Modules** | **32 tests** | **Kiểm tra chức năng toàn diện** | **32/32 (100%)** |
 
 ---
 
 ## 8. Danh mục REST API
 
-| Method | Endpoint | Mô tả Chi tiết |
+| Phương thức | Đường dẫn | Chức năng |
 | :--- | :--- | :--- |
-| `GET` | `/health` | Kiểm tra tình trạng hoạt động của backend service |
-| `GET` | `/documents` | Lấy danh sách tài liệu hiện có kèm metadata (status, chunks, size, date) |
-| `POST` | `/documents/upload` | Tải lên tài liệu (.pdf, .csv, .md, .txt) và đẩy vào tác vụ xử lý ngầm (Async) |
-| `GET` | `/documents/{id}/status` | Truy vấn trạng thái tiến trình xử lý tài liệu (`processing` / `ready` / `error`) |
-| `GET` | `/documents/{id}/view` | Xem nội dung thô hoặc render tài liệu trực tiếp trên giao diện |
-| `DELETE` | `/documents/{id}` | Xóa tài liệu khỏi SQLite, Milvus Vector DB và tự động hủy Semantic Cache |
-| `POST` | `/chat/stream` | Gửi câu hỏi và nhận stream phản hồi qua SSE (hỗ trợ `@tài_liệu` scope, CoT, Telemetry) |
-| `POST` | `/chat` | Gửi câu hỏi nhận phản hồi đơn dạng JSON (dành cho client không hỗ trợ SSE) |
-| `POST` | `/chat/cache/clear` | Hủy toàn bộ collection cache ngữ nghĩa trên Milvus |
-| `GET` | `/chat/sessions` | Lấy danh sách tất cả các phiên hội thoại |
-| `POST` | `/chat/sessions` | Khởi tạo một phiên hội thoại mới |
-| `GET` | `/chat/sessions/{id}/messages` | Tải lại toàn bộ lịch sử tin nhắn của một phiên hội thoại |
-| `DELETE` | `/chat/sessions/{id}` | Xóa một phiên hội thoại và dọn dẹp các checkpoint liên quan |
-| `POST` | `/chat/rollback` | Quay lui trạng thái hội thoại về một tin nhắn bất kỳ (Time-Travel Debugging) |
+| `GET` | `/health` | Kiểm tra trạng thái hoạt động của backend |
+| `GET` | `/documents` | Lấy danh sách tài liệu kèm trạng thái (`processing`, `ready`, `error`) |
+| `POST` | `/documents/upload` | Tải lên tài liệu mới (.pdf, .csv, .md, .txt) và xử lý ở chế độ nền |
+| `GET` | `/documents/{id}/status` | Kiểm tra tiến trình xử lý của tài liệu |
+| `GET` | `/documents/{id}/view` | Xem nội dung hoặc tải file tài liệu để hiển thị |
+| `DELETE` | `/documents/{id}` | Xóa tài liệu khỏi database, vector store và xóa cache liên quan |
+| `POST` | `/chat/stream` | Gửi câu hỏi và nhận stream phản hồi qua SSE (hỗ trợ `@tài_liệu`, CoT, Telemetry) |
+| `POST` | `/chat` | Gửi câu hỏi nhận phản hồi dạng JSON thông thường |
+| `POST` | `/chat/cache/clear` | Xóa dữ liệu cache ngữ nghĩa trên Milvus |
+| `GET` | `/chat/sessions` | Lấy danh sách các phiên trò chuyện |
+| `POST` | `/chat/sessions` | Tạo phiên trò chuyện mới |
+| `GET` | `/chat/sessions/{id}/messages` | Lấy lịch sử tin nhắn của một phiên |
+| `DELETE` | `/chat/sessions/{id}` | Xóa phiên trò chuyện và các checkpoint tương ứng |
+| `POST` | `/chat/rollback` | Quay lui trạng thái hội thoại về một tin nhắn cụ thể |
 
 ---
 
-## 9. Hướng dẫn Cài đặt & Khởi chạy Nhanh
+## 9. Hướng dẫn cài đặt & khởi chạy
 
-### Yêu cầu Hệ thống:
-- **Python**: 3.10 trở lên (Khuyến nghị 3.12)
-- **Node.js**: 18 trở lên & npm
-- **Docker & Docker Compose**: Để chạy Milvus Standalone (kèm MinIO và etcd)
-- **Google Gemini API Key**
+### Yêu cầu môi trường:
+- Python 3.10 trở lên (khuyến nghị 3.12).
+- Node.js 18 trở lên và npm.
+- Docker Desktop (dùng để chạy cơ sở dữ liệu Milvus).
+- Khóa API của Google Gemini.
 
-### Bước 1: Chuẩn bị Biến Môi trường
-Tạo tệp `backend/.env` từ file mẫu:
+### Bước 1: Cấu hình biến môi trường
+Tạo tệp `backend/.env` với các thông tin cơ bản:
 ```env
-GEMINI_API_KEY=your_gemini_api_key_here
+GEMINI_API_KEY=dien_api_key_cua_ban_o_day
 GEMINI_MODEL=gemini-2.5-flash
 MILVUS_URI=http://localhost:19530
 PORT=8001
 HOST=0.0.0.0
 ```
 
-### Bước 2: Khởi chạy 1-Click (Khuyến nghị)
+### Bước 2: Khởi chạy nhanh bằng script
 
 - **Trên Linux / macOS**:
   ```bash
@@ -283,21 +276,21 @@ HOST=0.0.0.0
   ./start.sh
   ```
 - **Trên Windows**:
-  Nhấp đúp chuột hoặc chạy từ PowerShell/CMD:
+  Chạy tệp `start.bat` từ Command Prompt hoặc PowerShell:
   ```cmd
   start.bat
   ```
 
-*Script tự động bật container Milvus, thiết lập môi trường ảo Python venv, cài đặt dependencies và mở Backend (cổng 8001) cùng Frontend (cổng 3000).*
+*Script sẽ tự động khởi động các container phụ trợ của Milvus, chuẩn bị môi trường ảo Python, cài đặt thư viện và mở Backend (cổng 8001) cùng Frontend (cổng 3000).*
 
-### Bước 3: Khởi chạy Thủ công từng phần
+### Bước 3: Khởi chạy thủ công từng phần
 
-1. **Khởi động Cơ sở dữ liệu Milvus**:
+1. **Khởi động Milvus qua Docker**:
    ```bash
    docker compose up -d standalone
    ```
 
-2. **Cài đặt & Khởi động Backend**:
+2. **Cài đặt và chạy Backend**:
    ```bash
    cd backend
    python -m venv .venv
@@ -306,7 +299,7 @@ HOST=0.0.0.0
    uvicorn app.main:app --reload --port 8001
    ```
 
-3. **Cài đặt & Khởi động Frontend**:
+3. **Cài đặt và chạy Frontend**:
    ```bash
    cd frontend
    npm install
@@ -315,24 +308,24 @@ HOST=0.0.0.0
 
 ---
 
-## 10. Triển khai Docker & Kubernetes
+## 10. Triển khai với Docker & Kubernetes
 
-### Chạy Toàn bộ Hệ thống bằng Docker Compose:
+### Chạy bằng Docker Compose:
 ```bash
 docker compose up --build
 ```
-Hệ thống sẽ đồng thời kích hoạt 5 container: `etcd`, `minio`, `standalone` (Milvus), `backend`, và `frontend`.
+Lệnh này sẽ khởi động đầy đủ các dịch vụ gồm Milvus (kèm etcd, MinIO), Backend FastAPI và Frontend React.
 
-### Triển khai lên cụm Kubernetes:
-Các manifest triển khai chuẩn đã được chuẩn bị sẵn tại thư mục [`k8s/`](k8s/):
+### Triển khai trên Kubernetes:
+Các tệp cấu hình triển khai cơ bản nằm trong thư mục [`k8s/`](k8s/):
 ```bash
-# 1. Tạo ConfigMap và Secrets
+# 1. Áp dụng ConfigMap
 kubectl apply -f k8s/backend-config.yaml
 
-# 2. Triển khai Backend & Service
+# 2. Triển khai Backend
 kubectl apply -f k8s/backend-deployment.yaml
 
-# 3. Triển khai Frontend & Service
+# 3. Triển khai Frontend
 kubectl apply -f k8s/frontend-deployment.yaml
 ```
 
