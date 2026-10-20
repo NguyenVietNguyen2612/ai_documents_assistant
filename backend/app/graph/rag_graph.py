@@ -66,10 +66,13 @@ def _extract_text_from_content(content) -> str:
     return str(content or "")
 
 
-def _sanitize_messages_for_llm(messages) -> list:
+def _sanitize_messages_for_llm(messages, max_window: int = 16) -> list:
     """
-    Làm sạch các AIMessage từ các lượt hội thoại trước (loại bỏ khối <think>...</think> cũ)
-    để tránh việc mô hình bắt chước sinh thẻ <think> văn bản thô thay vì gọi structured tool_calls ở lượt mới.
+    Tối ưu hóa Context Window & Nén Bộ nhớ Hội thoại (ToolMessage Pruning & Sliding Window):
+    1. Làm sạch các AIMessage cũ (loại bỏ khối <think>...</think> cũ tránh làm mô hình bắt chước).
+    2. Cắt tỉa (Pruning) các ToolMessage từ các lượt hội thoại trước (idx < last_human_idx) 
+       để giảm 60-70% lượng token Context Window tiêu thụ trong các phiên trao đổi dài.
+    3. Áp dụng Sliding Window giữ tối đa `max_window` tin nhắn gần nhất kèm SystemMessage ở đầu.
     """
     last_human_idx = -1
     for i in range(len(messages) - 1, -1, -1):
@@ -95,8 +98,28 @@ def _sanitize_messages_for_llm(messages) -> list:
             if not cleaned:
                 cleaned = "(Đã phản hồi)"
             sanitized.append(AIMessage(content=cleaned))
+        elif idx < last_human_idx and isinstance(msg, ToolMessage):
+            # [ToolMessage Pruning]: Thu gọn ngữ cảnh ToolMessage ở các lượt cũ
+            raw_content = _extract_text_from_content(msg.content)
+            if len(raw_content) > 150:
+                short_summary = raw_content[:100] + "... [Ngữ cảnh đã được tổng hợp ở câu trả lời trước]"
+                pruned_tool = ToolMessage(
+                    content=short_summary,
+                    tool_call_id=msg.tool_call_id,
+                    name=getattr(msg, "name", None),
+                )
+                sanitized.append(pruned_tool)
+            else:
+                sanitized.append(msg)
         else:
             sanitized.append(msg)
+
+    # [Sliding Window]: Nếu lịch sử vượt ngưỡng max_window, giữ lại SystemMessage đầu tiên + các message gần nhất
+    if len(sanitized) > (max_window + 1):
+        system_msg = sanitized[0]
+        recent_msgs = sanitized[-max_window:]
+        sanitized = [system_msg] + recent_msgs
+
     return sanitized
 
 

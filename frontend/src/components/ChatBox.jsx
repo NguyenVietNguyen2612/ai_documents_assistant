@@ -436,6 +436,8 @@ function ChatBox({
                                       ...msg,
                                       telemetry: event.telemetry || null,
                                       latencyMs: event.telemetry?.latency_ms || msg.latencyMs,
+                                      cached: Boolean(event.telemetry?.cached || event.cached),
+                                      cacheSimilarity: event.telemetry?.cache_similarity || event.cache_similarity,
                                   }
                                 : msg
                         )
@@ -867,7 +869,16 @@ function ChatBox({
                                             {/* Thanh Telemetry & Công cụ dưới mỗi câu trả lời */}
                                             <div className="assistant-telemetry-bar">
                                                 <div className="telemetry-metrics">
-                                                    {message.latencyMs && (
+                                                    {message.cached && (
+                                                        <span
+                                                            className="telemetry-chip cache-hit-chip"
+                                                            title={`Phản hồi tức thì từ Semantic Cache Milvus (Độ tương đồng: ${((message.cacheSimilarity || 0.95) * 100).toFixed(1)}%)`}
+                                                        >
+                                                            <Zap size={11} />
+                                                            <span>⚡ Semantic Cache ({message.latencyMs ? `${message.latencyMs}ms` : "<50ms"})</span>
+                                                        </span>
+                                                    )}
+                                                    {message.latencyMs && !message.cached && (
                                                         <span className="telemetry-chip" title="Tổng thời gian phản hồi End-to-End">
                                                             <Clock size={11} />
                                                             <span>

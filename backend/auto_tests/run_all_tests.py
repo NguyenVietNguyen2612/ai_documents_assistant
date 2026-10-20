@@ -115,6 +115,16 @@ def main():
             ],
             "FastAPI REST Endpoints Integration",
         ),
+        (
+            "auto_tests.test_unit_semantic_cache_and_pruning",
+            [
+                "test_semantic_cache_store_and_lookup_hit",
+                "test_semantic_cache_miss_for_unrelated_query",
+                "test_semantic_cache_scoped_document_isolation",
+                "test_tool_message_pruning_and_sliding_window",
+            ],
+            "Semantic Cache & Context Window Pruning",
+        ),
     ]
 
     total_passed = 0

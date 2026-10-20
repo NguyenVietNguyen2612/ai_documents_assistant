@@ -4,6 +4,7 @@ from langchain_core.messages import HumanMessage, SystemMessage, AIMessage
 
 from app.graph.rag_graph import get_agent_graph
 from app.services.db_service import db_service
+from app.services.semantic_cache import semantic_cache_service
 
 class AgentService:
 
@@ -89,6 +90,20 @@ QUY TẮC ĐỊNH DẠNG VĂN BẢN (MARKDOWN CHUẨN):
             if at_match:
                 target_doc = at_match.group(1).strip()
 
+        # [Semantic Cache]: Kiểm tra phản hồi có sẵn trong cache (<50ms)
+        cached_hit = semantic_cache_service.lookup(question, scope_doc=target_doc)
+        if cached_hit:
+            return {
+                "answer": cached_hit["answer"],
+                "session_id": session_id,
+                "checkpoint_id": None,
+                "context": "",
+                "tool_calls_count": 0,
+                "latency_ms": cached_hit["latency_ms"],
+                "cached": True,
+                "cache_similarity": cached_hit["similarity"],
+            }
+
         effective_prompt = question
         if target_doc:
             effective_prompt += f"\n\n[LƯU Ý PHẠM VI TÀI LIỆU]: Người dùng chỉ định tập trung phân tích tài liệu '{target_doc}'. Bạn hãy ưu tiên truyền tham số document_name='{target_doc}' khi kích hoạt công cụ tra cứu."
@@ -123,6 +138,16 @@ QUY TẮC ĐỊNH DẠNG VĂN BẢN (MARKDOWN CHUẨN):
         clean_answer = re.sub(r'<(?:think|thought)>.*?</(?:think|thought|quist)>', '', raw_answer, flags=re.DOTALL)
         clean_answer = re.sub(r'<accessibility>.*?</accessibility>', '', clean_answer, flags=re.DOTALL).strip()
 
+        # Lưu câu trả lời vào Semantic Cache nếu hợp lệ
+        if clean_answer and len(clean_answer) > 10:
+            semantic_cache_service.store(
+                query=question,
+                answer=clean_answer,
+                thoughts=[],
+                sources=[],
+                scope_doc=target_doc,
+            )
+
         # Lấy checkpoint id sau khi hoàn thành
         new_state = await graph.aget_state(config)
         new_checkpoint_id = new_state.config["configurable"].get("checkpoint_id")
@@ -135,6 +160,7 @@ QUY TẮC ĐỊNH DẠNG VĂN BẢN (MARKDOWN CHUẨN):
             "context": "\n\n---\n\n".join(tool_contexts),
             "tool_calls_count": len(tool_contexts),
             "latency_ms": latency_ms,
+            "cached": False,
         }
 
 
@@ -170,6 +196,56 @@ QUY TẮC ĐỊNH DẠNG VĂN BẢN (MARKDOWN CHUẨN):
             at_match = re.search(r'@([a-zA-Z0-9_\-\.\s]+?\.(?:pdf|csv|md|txt))', question, re.IGNORECASE)
             if at_match:
                 target_doc = at_match.group(1).strip()
+
+        # [Semantic Cache]: Tra cứu câu trả lời tương đương trong Semantic Cache (<50ms, 0 token LLM)
+        cache_hit = semantic_cache_service.lookup(question, scope_doc=target_doc)
+        if cache_hit:
+            hit_similarity = cache_hit["similarity"]
+            hit_latency = cache_hit["latency_ms"]
+            cache_thought = {
+                "type": "thought",
+                "step": "router",
+                "content": f"⚡ Semantic Cache Hit! Tìm thấy câu trả lời tương đồng ngữ nghĩa: {(hit_similarity * 100):.1f}% (>= 95%) trong {hit_latency}ms. Phản hồi tức thì với 0 token LLM!"
+            }
+            yield f"data: {json.dumps(cache_thought, ensure_ascii=False)}\n\n"
+
+            cached_sources = cache_hit.get("sources") or []
+            if cached_sources:
+                yield f"data: {json.dumps({'type': 'sources', 'sources': cached_sources}, ensure_ascii=False)}\n\n"
+
+            cached_answer = cache_hit["answer"]
+            yield f"data: {json.dumps({'type': 'token', 'content': cached_answer}, ensure_ascii=False)}\n\n"
+
+            telemetry_event = {
+                "type": "telemetry",
+                "step": "telemetry",
+                "telemetry": {
+                    "latency_ms": hit_latency,
+                    "router_ms": hit_latency,
+                    "tool_calls": 0,
+                    "top_rerank_score": hit_similarity,
+                    "cached": True,
+                    "cache_similarity": hit_similarity,
+                },
+            }
+            yield f"data: {json.dumps(telemetry_event, ensure_ascii=False)}\n\n"
+
+            asst_msg_id = db_service.save_message(
+                session_id=session_id,
+                role="assistant",
+                content=cached_answer,
+                thoughts=[cache_thought] + ([{"type": "sources", "sources": cached_sources}] if cached_sources else []),
+                checkpoint_id=None
+            )
+
+            session_msgs = db_service.get_session_messages(session_id)
+            if len(session_msgs) <= 2:
+                auto_title = (question[:28] + "...") if len(question) > 28 else question
+                db_service.update_session_title(session_id, auto_title)
+
+            yield f"data: {json.dumps({'type': 'checkpoint', 'session_id': session_id, 'checkpoint_id': None, 'user_message_id': user_msg_id, 'assistant_message_id': asst_msg_id}, ensure_ascii=False)}\n\n"
+            yield f"data: {json.dumps({'type': 'done'}, ensure_ascii=False)}\n\n"
+            return
 
         effective_prompt = question
         if target_doc:
@@ -575,6 +651,21 @@ QUY TẮC ĐỊNH DẠNG VĂN BẢN (MARKDOWN CHUẨN):
                 thoughts=thoughts_history,
                 checkpoint_id=latest_checkpoint_id
             )
+
+            # [Semantic Cache]: Lưu phản hồi vào cache để tái sử dụng với 0 token LLM
+            if full_answer and len(full_answer) > 10:
+                saved_sources = []
+                for t in thoughts_history:
+                    if t.get("type") == "sources" and t.get("sources"):
+                        saved_sources = t["sources"]
+                        break
+                semantic_cache_service.store(
+                    query=question,
+                    answer=full_answer,
+                    thoughts=thoughts_history,
+                    sources=saved_sources,
+                    scope_doc=target_doc,
+                )
 
             # Cập nhật tiêu đề session nếu là câu hỏi đầu tiên
             session_msgs = db_service.get_session_messages(session_id)

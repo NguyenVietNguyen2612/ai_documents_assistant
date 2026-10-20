@@ -974,6 +974,19 @@ textarea:focus-visible {
   font-family: var(--font-mono);
 }
 
+.telemetry-chip.cache-hit-chip {
+  background: rgba(16, 185, 129, 0.12);
+  color: #059669;
+  border: 1px solid rgba(16, 185, 129, 0.28);
+  font-weight: 700;
+}
+
+[data-theme="dark"] .telemetry-chip.cache-hit-chip {
+  background: rgba(16, 185, 129, 0.2);
+  color: #34d399;
+  border-color: rgba(16, 185, 129, 0.35);
+}
+
 .telemetry-action-btn {
   display: inline-flex;
   align-items: center;

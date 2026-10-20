@@ -5,6 +5,7 @@ from app.services.document_service import DocumentService
 from app.services.vector_store import VectorStore
 from app.services.db_service import db_service
 from app.services.bm25_service import bm25_service
+from app.services.semantic_cache import semantic_cache_service
 import uuid
 
 router = APIRouter()
@@ -54,6 +55,7 @@ def process_document_background(doc_id: str, filename: str, saved_file_path: Pat
             print(f"[Async Ingestion] Đã cập nhật chỉ mục BM25 cho '{filename}'.")
 
         db_service.update_document_status(doc_id, status="ready", chunk_count=len(data_to_insert))
+        semantic_cache_service.clear()
         print(f"[Async Ingestion] Hoàn tất xử lý ngầm tài liệu '{filename}' (ID: {doc_id}) với {len(data_to_insert)} chunks -> Trạng thái: READY ✅")
     except Exception as e:
         print(f"[Async Ingestion] Lỗi khi xử lý ngầm tài liệu '{filename}': {e} ❌")
@@ -160,6 +162,9 @@ def delete_document(document_id: str):
     
     # Remove from BM25 index
     bm25_service.remove_documents_by_id(document_id)
+
+    # Invalidate Semantic Cache
+    semantic_cache_service.clear()
 
     # Xóa file vật lý tương ứng nếu có
     for f in DOCS_DIR.glob(f"{document_id}.*"):

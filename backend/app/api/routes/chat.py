@@ -136,3 +136,10 @@ async def rollback_chat(request: RollbackRequest):
         checkpoint_id=request.checkpoint_id,
         messages=remaining_msgs
     )
+
+
+@router.post("/cache/clear")
+def clear_semantic_cache():
+    from app.services.semantic_cache import semantic_cache_service
+    success = semantic_cache_service.clear()
+    return {"status": "success" if success else "error", "message": "Semantic Cache cleared."}
