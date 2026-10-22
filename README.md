@@ -27,13 +27,14 @@
    - [3.5 Lưu trữ Checkpoint và Time-Travel](#35-lưu-trữ-checkpoint-và-time-travel)
 4. [Kiến trúc luồng xử lý (Two-System Architecture)](#4-kiến-trúc-luồng-xử-lý-two-system-architecture)
 5. [Quy trình nạp tài liệu và tìm kiếm kết hợp (2-Stage Hybrid Retrieval)](#5-quy-trình-nạp-tài-liệu-và-tìm-kiếm-kết-hợp-2-stage-hybrid-retrieval)
-6. [Thử nghiệm đánh giá hiệu quả (Ablation Study)](#6-thử-nghiệm-đánh-giá-hiệu-quả-ablation-study)
-7. [Các lựa chọn thiết kế kỹ thuật](#7-các-lựa-chọn-thiết-kế-kỹ-thuật)
-8. [Các công cụ của Agent (Multi-Tool Ecosystem)](#8-các-công-cụ-của-agent-multi-tool-ecosystem)
-9. [Kết quả kiểm thử tự động](#9-kết-quả-kiểm-thử-tự-động)
-10. [Danh mục REST API](#10-danh-mục-rest-api)
-11. [Hướng dẫn cài đặt & khởi chạy](#11-hướng-dẫn-cài-đặt--khởi-chạy)
-12. [Triển khai với Docker & Kubernetes](#12-triển-khai-với-docker--kubernetes)
+6. [Cấu trúc lưu trữ và Mối quan hệ dữ liệu](#6-cấu-trúc-lưu-trữ-và-mối-quan-hệ-dữ-liệu)
+7. [Thử nghiệm đánh giá hiệu quả (Ablation Study)](#7-thử-nghiệm-đánh-giá-hiệu-quả-ablation-study)
+8. [Các lựa chọn thiết kế kỹ thuật](#8-các-lựa-chọn-thiết-kế-kỹ-thuật)
+9. [Các công cụ của Agent (Multi-Tool Ecosystem)](#9-các-công-cụ-của-agent-multi-tool-ecosystem)
+10. [Kết quả kiểm thử tự động](#10-kết-quả-kiểm-thử-tự-động)
+11. [Danh mục REST API](#11-danh-mục-rest-api)
+12. [Hướng dẫn cài đặt & khởi chạy](#12-hướng-dẫn-cài-đặt--khởi-chạy)
+13. [Triển khai với Docker & Kubernetes](#13-triển-khai-với-docker--kubernetes)
 
 ---
 
@@ -252,7 +253,99 @@ flowchart LR
 
 ---
 
-## 6. Thử nghiệm đánh giá hiệu quả (Ablation Study)
+## 6. Cấu trúc lưu trữ và Mối quan hệ dữ liệu
+
+Hệ thống quản lý dữ liệu trên 4 thành phần lưu trữ chuyên biệt (tất cả các tệp `.db` trong dự án đều là cơ sở dữ liệu **SQLite** cục bộ):
+
+```text
+                                [ Người dùng Upload File ]
+                                             |
+                  +--------------------------+--------------------------+
+                  |                          |                          |
+                  v                          v                          v
+       [ 1. FILE SYSTEM ]           [ 2. SQLITE: database.db ]   [ 3. MILVUS VECTOR DB ]
+      app_data/documents/                 Bảng documents         Collection document_chunks
+    +--------------------+              +--------------------+     +------------------------+
+    | Tệp: <doc_id>.pdf  | <--(doc_id)--| id: <doc_id> (PK)  |---->| id: <doc_id>_0 (PK)    |
+    |      <doc_id>.csv  |              | name: "CS338.pdf"  |     | vector: [384 dims]     |
+    |      <doc_id>.md   |              | status: "ready"    |     | document_id: <doc_id>  |
+    +--------------------+              | chunk_count: 12    |     | page: 1, chunk_idx: 0  |
+                                        +--------------------+     +------------------------+
+                                                  |
+                                                  | (Lập chỉ mục từ khóa)
+                                                  v
+                                       [ 4. BM25 INVERTED INDEX ]
+                                        (Tìm kiếm từ khóa chính xác)
+
+
+                                [ Người dùng Trò chuyện (Chat) ]
+                                             |
+                                             v
+                                  [ 2. SQLITE: database.db ]
+                                       Bảng chat_sessions
+                                     +------------------+
+                                     | id: <session_id> |
+                                     +------------------+
+                                             | (1 - N)
+                                             v
+                                     Bảng chat_messages
+                                     +-----------------------------------+
+                                     | id: <message_id>                  |
+                                     | session_id: <session_id>          |
+                                     | role: "user" | "assistant"        |
+                                     | content: "Nội dung câu trả lời..."|
+                                     | thoughts_json: "[Suy nghĩ <think>]"
+                                     | checkpoint_id: <checkpoint_id>    |
+                                     +-----------------------------------+
+                                                       |
+                                                       | (Trỏ đến snapshot trạng thái)
+                                                       v
+                                          [ 5. SQLITE: checkpoints.db ]
+                                              (AsyncSqliteSaver Engine)
+                                     +-----------------------------------+
+                                     | thread_id: <session_id>           |
+                                     | checkpoint_id: <checkpoint_id>    |
+                                     | checkpoint: AgentState Snapshot   |
+                                     | (Messages, Tool Calls, Node State)|
+                                     +-----------------------------------+
+```
+
+### Chi tiết các thành phần lưu trữ:
+
+1. **File System (`app_data/documents/`)**:
+   - Lưu trữ các tệp nhị phân gốc (`.pdf`, `.csv`, `.md`, `.txt`) theo tên `<doc_id>.<ext>`.
+   - Phục vụ việc xem trước (preview) trực tiếp trên giao diện trình duyệt hoặc tải về khi cần.
+
+2. **SQLite ứng dụng (`app_data/database.db`)**:
+   - Quản lý dữ liệu quan hệ gồm 3 bảng chính:
+     - `documents`: Quản lý danh sách file, kích thước, số lượng chunk và trạng thái xử lý (`processing`, `ready`, `error`).
+     - `chat_sessions`: Quản lý danh sách các phiên hội thoại.
+     - `chat_messages`: Lưu lịch sử tin nhắn, khối suy luận `<think>` và khóa ngoại `checkpoint_id` liên kết sang kho snapshot của Agent.
+
+3. **Milvus Vector Database (Docker Container - Cổng 19530)**:
+   - Quản lý 2 bộ sưu tập (Collection) vector 384 chiều:
+     - `document_chunks`: Lưu trữ các đoạn văn bản kèm vector nhúng ngữ nghĩa, `page` (số trang gốc) và `chunk_index` để phục vụ tìm kiếm Dense Search và mở rộng cửa sổ lân cận.
+     - `semantic_cache`: Lưu trữ cặp câu hỏi - câu trả lời để phản hồi siêu tốc (<50ms) cho các câu hỏi trùng ý nghĩa.
+
+4. **Chỉ mục BM25 (`bm25_service`)**:
+   - Lập bảng chỉ mục ngược (Inverted Index) từ vựng từ các chunk để phục vụ tìm kiếm từ khóa chính xác (Lexical Search) trong thuật toán Hybrid RRF.
+
+5. **SQLite Checkpoint của LangGraph (`app_data/checkpoints.db`)**:
+   - Quản lý bởi `AsyncSqliteSaver` của LangGraph.
+   - **Cơ chế lưu Snapshot luồng Agent:**
+     - Mỗi khi Agent hoàn tất một bước trong đồ thị (suy nghĩ, gọi tool, hoặc tổng hợp câu trả lời), LangGraph tự động "chụp ảnh" (snapshot) lại toàn bộ bộ nhớ `AgentState` tại thời điểm đó và lưu vào cơ sở dữ liệu với một mã `checkpoint_id`.
+     - **Khôi phục phiên (Resume):** Khi ứng dụng khởi động lại hoặc người dùng vào lại phiên chat cũ, Agent chỉ cần nạp lại trạng thái từ `checkpoints.db` theo `thread_id` (`session_id`) là có thể tiếp tục mạch hội thoại mà không cần gửi lại toàn bộ lịch sử thô.
+     - **Quay ngược thời gian (Time-Travel / Rollback):** Cho phép người dùng quay lui phiên trò chuyện về một tin nhắn bất kỳ trong quá khứ (`POST /chat/rollback`). Đồ thị trạng thái của Agent sẽ quay về đúng "điểm lưu" (snapshot) tại tin nhắn đó, giúp người dùng đặt lại câu hỏi theo hướng khác mà không bị ô nhiễm bởi các lượt chat sai phía sau.
+
+6. **Cơ chế đồng bộ chống lệch dữ liệu (Ghost / Orphan Sync)**:
+   - Khi Backend khởi động, hệ thống tự động đối chiếu danh sách `doc_id` giữa **SQLite** (`database.db`) và **Milvus** (`document_chunks`):
+     - Bản ghi ma (Ghost): Tồn tại trong SQLite nhưng mất vector trong Milvus -> Tự động dọn khỏi SQLite.
+     - Bản ghi mồ côi (Orphan): Tồn tại vector trong Milvus nhưng SQLite không có -> Tự động xóa khỏi Milvus.
+   - Khi xóa tài liệu (`DELETE /documents/{id}`), hệ thống xóa đồng thời ở File trên đĩa, SQLite, Milvus và làm mới Semantic Cache.
+
+---
+
+## 7. Thử nghiệm đánh giá hiệu quả (Ablation Study)
 
 Để kiểm tra xem việc kết hợp BM25 và Cross-Encoder có thực sự cải thiện khả năng tìm kiếm so với chỉ dùng Vector đơn thuần hay không, dự án thực hiện đo lường trên bộ câu hỏi thử nghiệm ([`backend/evaluation/dataset.json`](backend/evaluation/dataset.json)) với các dạng truy vấn khác nhau (từ khóa đặc thù, tên riêng, câu hỏi ngữ nghĩa):
 
@@ -270,7 +363,7 @@ flowchart LR
 
 ---
 
-## 7. Các lựa chọn thiết kế kỹ thuật
+## 8. Các lựa chọn thiết kế kỹ thuật
 
 Trong quá trình phát triển, một số giải pháp kỹ thuật đã được cân nhắc để cân đối giữa chi phí, thời gian xử lý và độ chính xác:
 
@@ -289,7 +382,7 @@ Trong quá trình phát triển, một số giải pháp kỹ thuật đã đư�
 
 ---
 
-## 8. Các công cụ của Agent (Multi-Tool Ecosystem)
+## 9. Các công cụ của Agent (Multi-Tool Ecosystem)
 
 Các công cụ được tổ chức tách biệt tại thư mục [`backend/app/tools/`](backend/app/tools/):
 
@@ -300,7 +393,7 @@ Các công cụ được tổ chức tách biệt tại thư mục [`backend/app
 
 ---
 
-## 9. Kết quả kiểm thử tự động
+## 10. Kết quả kiểm thử tự động
 
 Dự án có sẵn bộ script kiểm thử tự động để kiểm tra các thành phần từ backend API, dịch vụ xử lý tài liệu đến luồng stream SSE:
 
@@ -321,7 +414,7 @@ python backend/auto_tests/run_all_tests.py
 
 ---
 
-## 10. Danh mục REST API
+## 11. Danh mục REST API
 
 | Phương thức | Đường dẫn | Chức năng |
 | :--- | :--- | :--- |
@@ -342,7 +435,7 @@ python backend/auto_tests/run_all_tests.py
 
 ---
 
-## 11. Hướng dẫn cài đặt & khởi chạy
+## 12. Hướng dẫn cài đặt & khởi chạy
 
 ### Yêu cầu môi trường:
 - Python 3.10 trở lên (khuyến nghị 3.12).
@@ -400,7 +493,7 @@ HOST=0.0.0.0
 
 ---
 
-## 12. Triển khai với Docker & Kubernetes
+## 13. Triển khai với Docker & Kubernetes
 
 ### Chạy bằng Docker Compose:
 ```bash
