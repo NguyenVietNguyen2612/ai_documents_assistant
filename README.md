@@ -1,12 +1,14 @@
 # AI Documents Assistant
 
-[![CI/CD Pipeline](https://github.com/NguyenVietNguyen2612/ai_documents_assistant/actions/workflows/ci-cd.yml/badge.svg)](https://github.com/NguyenVietNguyen2612/ai_documents_assistant/actions/workflows/ci-cd.yml)
+[![CI/CD Pipeline](https://img.shields.io/badge/CI%2FCD-GitHub%20Actions-2088FF?logo=githubactions&logoColor=white)](https://github.com/NguyenVietNguyen2612/ai_documents_assistant/actions)
 [![Python](https://img.shields.io/badge/Python-3.12+-3776AB?logo=python&logoColor=white)](https://www.python.org/)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.115+-009688?logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/)
+[![LangChain](https://img.shields.io/badge/LangChain-1C3C3C?logo=langchain&logoColor=white)](https://www.langchain.com/)
 [![LangGraph](https://img.shields.io/badge/LangGraph-0.2+-FF6F00?logo=langchain&logoColor=white)](https://langchain-ai.github.io/langgraph/)
 [![Milvus](https://img.shields.io/badge/Milvus-2.4+-00A4E4?logo=linuxcontainers&logoColor=white)](https://milvus.io/)
 [![React](https://img.shields.io/badge/React-18+-61DAFB?logo=react&logoColor=black)](https://react.dev/)
-[![Automated Tests](https://img.shields.io/badge/Tests-32%2F32%20PASS-success)](backend/auto_tests/)
+[![Vite](https://img.shields.io/badge/Vite-646CFF?logo=vite&logoColor=white)](https://vitejs.dev/)
+[![Docker](https://img.shields.io/badge/Docker-2496ED?logo=docker&logoColor=white)](https://www.docker.com/)
 [![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
 > **Dự án cá nhân** tìm hiểu và thực hành xây dựng hệ thống trợ lý hỏi đáp tài liệu thông minh (RAG) sử dụng **FastAPI**, **LangGraph ReAct Agent**, **Milvus Vector Database** và giao diện **React**. Dự án tập trung vào việc thử nghiệm các kỹ thuật cải thiện chất lượng tìm kiếm (Hybrid Search, Reranking, Window Expansion) và tối ưu trải nghiệm tương tác với tài liệu.
@@ -28,7 +30,7 @@
 6. [Thử nghiệm đánh giá hiệu quả (Ablation Study)](#6-thử-nghiệm-đánh-giá-hiệu-quả-ablation-study)
 7. [Các lựa chọn thiết kế kỹ thuật](#7-các-lựa-chọn-thiết-kế-kỹ-thuật)
 8. [Các công cụ của Agent (Multi-Tool Ecosystem)](#8-các-công-cụ-của-agent-multi-tool-ecosystem)
-9. [Kết quả kiểm thử tự động (32/32 tests)](#9-kết-quả-kiểm-thử-tự-động-3232-tests)
+9. [Kết quả kiểm thử tự động](#9-kết-quả-kiểm-thử-tự-động)
 10. [Danh mục REST API](#10-danh-mục-rest-api)
 11. [Hướng dẫn cài đặt & khởi chạy](#11-hướng-dẫn-cài-đặt--khởi-chạy)
 12. [Triển khai với Docker & Kubernetes](#12-triển-khai-với-docker--kubernetes)
@@ -78,7 +80,7 @@ ai_documents_assistant/
 │   │   ├── tools/               # Các công cụ của Agent: retrieve, list, overview, calculator
 │   │   └── main.py              # Điểm khởi chạy ứng dụng FastAPI và vòng đời hệ thống
 │   ├── app_data/                # File cơ sở dữ liệu SQLite cục bộ (lịch sử chat, checkpoint, metadata)
-│   ├── auto_tests/              # Bộ 32 bài kiểm thử tự động (unit, integration, tools, cache, stream)
+│   ├── auto_tests/              # Bộ kiểm thử tự động (unit, integration, tools, cache, stream)
 │   ├── evaluation/              # Pipeline RAGOps đánh giá định lượng (dataset, target, ablation_study)
 │   ├── Dockerfile               # Cấu hình container cho backend
 │   ├── requirements.txt         # Danh sách thư viện Python
@@ -298,7 +300,7 @@ Các công cụ được tổ chức tách biệt tại thư mục [`backend/app
 
 ---
 
-## 9. Kết quả kiểm thử tự động (32/32 tests)
+## 9. Kết quả kiểm thử tự động
 
 Dự án có sẵn bộ script kiểm thử tự động để kiểm tra các thành phần từ backend API, dịch vụ xử lý tài liệu đến luồng stream SSE:
 
@@ -307,16 +309,15 @@ Dự án có sẵn bộ script kiểm thử tự động để kiểm tra các t
 python backend/auto_tests/run_all_tests.py
 ```
 
-| STT | Tập tin kiểm thử | Số test | Nội dung kiểm tra | Trạng thái |
-| :---: | :--- | :---: | :--- | :---: |
-| 1 | [`test_unit_retriever_bm25.py`](backend/auto_tests/test_unit_retriever_bm25.py) | **7** | Tìm kiếm Milvus, BM25, RRF, Reranker, Window Expansion, Corrective RAG | ✅ PASS |
-| 2 | [`test_unit_semantic_cache_and_pruning.py`](backend/auto_tests/test_unit_semantic_cache_and_pruning.py) | **4** | Semantic Cache trên Milvus, xóa cache, cắt tỉa ToolMessage và Sliding Window | ✅ PASS |
-| 3 | [`test_integration_api.py`](backend/auto_tests/test_integration_api.py) | **6** | API upload ngầm, polling trạng thái, xóa file, phạm vi `@tài_liệu`, quản lý phiên | ✅ PASS |
-| 4 | [`test_integration_chat_stream.py`](backend/auto_tests/test_integration_chat_stream.py) | **3** | Luồng stream SSE, định dạng chunk suy nghĩ `<think>`, sự kiện telemetry | ✅ PASS |
-| 5 | [`test_tools.py`](backend/auto_tests/test_tools.py) | **5** | Khả năng kích hoạt công cụ của Agent, máy tính AST an toàn, Document Overview | ✅ PASS |
-| 6 | [`test_unit_laya_router.py`](backend/auto_tests/test_unit_laya_router.py) | **4** | Phân loại câu chào hỏi, ngưỡng tự tin tối thiểu (guardrail), fallback | ✅ PASS |
-| 7 | [`test_unit_db_documents.py`](backend/auto_tests/test_unit_db_documents.py) | **3** | Cập nhật cấu trúc SQLite, đồng bộ dữ liệu giữa SQLite và Milvus | ✅ PASS |
-| **Tổng cộng** | **7 Modules** | **32 tests** | **Kiểm tra chức năng toàn diện** | **32/32 (100%)** |
+| STT | Tập tin kiểm thử | Số test | Nội dung kiểm tra |
+| :---: | :--- | :---: | :--- |
+| 1 | [`test_unit_retriever_bm25.py`](backend/auto_tests/test_unit_retriever_bm25.py) | 7 | Tìm kiếm Milvus, BM25, RRF, Reranker, Window Expansion, Corrective RAG |
+| 2 | [`test_unit_semantic_cache_and_pruning.py`](backend/auto_tests/test_unit_semantic_cache_and_pruning.py) | 4 | Semantic Cache trên Milvus, xóa cache, cắt tỉa ToolMessage và Sliding Window |
+| 3 | [`test_integration_api.py`](backend/auto_tests/test_integration_api.py) | 6 | API upload ngầm, polling trạng thái, xóa file, phạm vi `@tài_liệu`, quản lý phiên |
+| 4 | [`test_integration_chat_stream.py`](backend/auto_tests/test_integration_chat_stream.py) | 3 | Luồng stream SSE, định dạng chunk suy nghĩ `<think>`, sự kiện telemetry |
+| 5 | [`test_tools.py`](backend/auto_tests/test_tools.py) | 5 | Khả năng kích hoạt công cụ của Agent, máy tính AST an toàn, Document Overview |
+| 6 | [`test_unit_laya_router.py`](backend/auto_tests/test_unit_laya_router.py) | 4 | Phân loại câu chào hỏi, ngưỡng tự tin tối thiểu (guardrail), fallback |
+| 7 | [`test_unit_db_documents.py`](backend/auto_tests/test_unit_db_documents.py) | 3 | Cập nhật cấu trúc SQLite, đồng bộ dữ liệu giữa SQLite và Milvus |
 
 ---
 
