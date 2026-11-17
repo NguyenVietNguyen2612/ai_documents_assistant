@@ -36,3 +36,4 @@ app_data/
 *.db-shm
 *.db-wal
 test_documents/
+backend/evaluation/.cache/
