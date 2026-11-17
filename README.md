@@ -245,7 +245,10 @@ flowchart LR
   4. Lưu đồng thời vector vào Milvus và từ khóa vào chỉ mục BM25 cục bộ.
 - **Hợp nhất kết quả bằng RRF**:
   Sử dụng công thức Reciprocal Rank Fusion với hằng số $k = 60$ để kết hợp thứ hạng từ Dense Vector và BM25:
-  $$\text{RRF\_Score}(d) = \sum_{m \in \{\text{dense}, \text{bm25}\}} \frac{1}{k + \text{rank}_m(d)}$$
+
+  ```math
+  \mathrm{RRF\_Score}(d) = \sum_{m \in \{\text{dense},\,\text{bm25}\}} \frac{1}{k + \text{rank}_m(d)}
+  ```
 - **Reranker với Cross-Encoder**:
   Mô hình `BAAI/bge-reranker-base` chấm điểm trực tiếp cặp `(Câu hỏi, Đoạn trích)` để chọn ra top kết quả có độ tương quan ngữ nghĩa cao nhất.
 - **Mở rộng cửa sổ (Window Expansion)**:
@@ -347,19 +350,19 @@ Hệ thống quản lý dữ liệu trên 4 thành phần lưu trữ chuyên bi�
 
 ## 7. Thử nghiệm đánh giá hiệu quả (Ablation Study)
 
-Để kiểm tra xem việc kết hợp BM25 và Cross-Encoder có thực sự cải thiện khả năng tìm kiếm so với chỉ dùng Vector đơn thuần hay không, dự án thực hiện đo lường trên bộ câu hỏi thử nghiệm ([`backend/evaluation/dataset.json`](backend/evaluation/dataset.json)) với các dạng truy vấn khác nhau (từ khóa đặc thù, tên riêng, câu hỏi ngữ nghĩa):
+Để kiểm tra khách quan hiệu quả của BM25 RRF và Cross-Encoder Reranker (`BAAI/bge-reranker-base`) so với tìm kiếm Vector đơn thuần, dự án sử dụng kịch bản đánh giá tại [`backend/evaluation/ablation_study.py`](backend/evaluation/ablation_study.py) trên bộ dữ liệu chuẩn quốc tế **BEIR SciFact (`mteb/scifact`, split `test`)** (`5.183` tài liệu khoa học, đo trên `100` câu truy vấn đầu với `116` cặp ground-truth qrels, `top_k=5`, `initial_k=15` qua In-Memory Cosine VectorStore khi chạy offline CPU; báo cáo chi tiết tại [`backend/evaluation/ablation_report.md`](backend/evaluation/ablation_report.md)):
 
-| Phương pháp truy xuất | Hit Rate@1 | Hit Rate@3 | MRR@3 | Độ phủ từ khóa | Thời gian trung bình |
-| :--- | :---: | :---: | :---: | :---: | :---: |
-| **Chỉ dùng Dense Vector (Milvus)** | 90.0% | 90.0% | 0.900 | 96.0% | **~38 ms** |
-| **Tìm kiếm kết hợp (Milvus + BM25 RRF)** | 90.0% | **100.0%** | 0.950 | **100.0%** | ~47 ms |
-| **Kết hợp + Tái xếp hạng (Hybrid + BGE Reranker)** | **100.0%** | **100.0%** | **1.000** | **100.0%** | ~142 ms |
+| Phương pháp truy xuất | Hit@1 | Hit@3 | Hit@5 | MRR@5 | nDCG@5 | Recall@5 | Thời gian TB (CPU) |
+| :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
+| **1. Chỉ dùng Dense Vector (`paraphrase-multilingual-MiniLM-L12-v2`)** | 43.00% | 51.00% | 57.00% | 0.4763 | 0.4891 | 55.58% | **156.9 ms** |
+| **2. Tìm kiếm kết hợp (Dense Vector + BM25 RRF)** | 52.00% | 73.00% | 81.00% | 0.6265 | 0.6560 | 78.48% | 213.0 ms |
+| **3. Kết hợp + Tái xếp hạng (2-Stage Hybrid + BGE Reranker)** | **65.00%** | **80.00%** | **87.00%** | **0.7333** | **0.7516** | **84.03%** | 5784.4 ms |
 
 > [!NOTE]
-> **Ghi nhận từ kết quả thử nghiệm:**
-> - Phương pháp chỉ dùng Vector gặp khó khăn ở các câu hỏi chứa mã định danh học thuật chính xác (ví dụ các tên viết tắt kỹ thuật) do vector embedding có xu hướng dàn đều ngữ nghĩa.
-> - Khi bổ sung BM25 thông qua RRF, toàn bộ tài liệu mục tiêu đều xuất hiện trong Top-3 kết quả tìm kiếm.
-> - Bước tái xếp hạng bằng BGE Cross-Encoder giúp đưa đoạn trích chính xác nhất lên vị trí Top-1 trong các ca thử nghiệm, tuy nhiên thời gian phản hồi tăng thêm khoảng 95ms do mô hình Cross-Encoder cần xử lý qua nhiều lớp attention.
+> **Ghi nhận từ kết quả thử nghiệm trên BEIR SciFact:**
+> - **Dense Vector Only** đạt `Hit@1 = 43.00%` và `nDCG@5 = 0.4891` do Bi-Encoder nén cả đoạn văn học thuật thành một vector cố định, dễ bỏ sót thuật ngữ chuyên ngành chính xác.
+> - **Hybrid + RRF** cải thiện mạnh khả năng thu hồi (`Recall@5` tăng từ `55.58%` lên `78.48%`, `nDCG@5` tăng lên `0.6560`).
+> - **2-Stage Hybrid + BGE Cross-Encoder Reranker** tiếp tục đẩy `Hit@1` lên **`65.00%`** (`+13.00` điểm % so với Hybrid RRF) và `nDCG@5` đạt **`0.7516`** (cải thiện thứ hạng trên 28/100 truy vấn so với Hybrid RRF và 44/100 truy vấn so với Vector Only), đánh đổi bằng độ trễ xử lý cặp `(Query, Document)` trên CPU.
 
 ---
 
