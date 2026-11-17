@@ -246,9 +246,6 @@ flowchart LR
 - **Hợp nhất kết quả bằng RRF**:
   Sử dụng công thức Reciprocal Rank Fusion với hằng số $k = 60$ để kết hợp thứ hạng từ Dense Vector và BM25:
 
-  ```math
-  \mathrm{RRF\_Score}(d) = \sum_{m \in \{\text{dense},\,\text{bm25}\}} \frac{1}{k + \text{rank}_m(d)}
-  ```
 - **Reranker với Cross-Encoder**:
   Mô hình `BAAI/bge-reranker-base` chấm điểm trực tiếp cặp `(Câu hỏi, Đoạn trích)` để chọn ra top kết quả có độ tương quan ngữ nghĩa cao nhất.
 - **Mở rộng cửa sổ (Window Expansion)**:
